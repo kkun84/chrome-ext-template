@@ -34,7 +34,7 @@ cd ~
 git clone <this-repo> chrome-ext-template
 cd chrome-ext-template
 
-# Nix devShell に入る（初回は flake.lock の生成が必要）
+# Nix devShell に入る（flake.lock はコミット済み）
 direnv allow            # または
 nix develop
 
@@ -44,15 +44,13 @@ pnpm install
 
 ### flake.lock について
 
-このリポジトリには **`flake.lock` を含めていません**。Nix がインストールされたマシンで、初回に次のいずれかを実行して生成してください。
+`flake.lock` はコミット済みです。`flake.nix` の入力 URL は `github:NixOS/nixpkgs/nixos-26.05` のまま、lock だけを 7 日以上経過した `nixos-26.05` の rev に固定しています（現在: `c9e06bd77aaeb410f5ed1fa491b58764a3d8c4b6`、committer date `2026-11-03T14:58:49Z`）。
+
+rev を更新するときも URL は変えず、同じ方針で lock だけを差し替えます。
 
 ```bash
-nix flake lock          # flake.lock を生成
-# または
-direnv allow            # .envrc 経由で自動的にロック
+nix flake lock --override-input nixpkgs github:NixOS/nixpkgs/<sha>
 ```
-
-生成された `flake.lock` はコミットして構いません。
 
 ---
 
@@ -170,7 +168,7 @@ Nix 外でローカル検証する場合のみ `CHROME_PATH=/usr/bin/google-chro
   pnpm test:e2e
   ```
 
-- **Nix ジョブ** は `nixos-26.05` を実行時に解決します。このリポジトリは **`flake.lock` をコミットしていません**（作成時に Nix が無かったため）。Nix のあるマシンで `nix flake lock` を実行して `flake.lock` をコミットすると、CI が完全に再現可能になり推奨されます。
+- **Nix ジョブ** はコミット済みの `flake.lock` を使います。`nixpkgs` は `nixos-26.05` の、7 日以上経過した rev に固定されています。
 - Playwright は **1.59.1 に固定** し、nixpkgs `playwright-driver` と一致させています（[Playwright のバージョン整合](#playwright-のバージョン整合) 参照）。
 - **CodeQL**（`codeql.yml`）と **dependency review**（`dependency-review.yml`）もこのテンプレートに含まれます。ワークフローを変えたら `gh actions-lock` で lockfile を更新し、`verify-lockfile` で検証してください。
 
@@ -207,7 +205,7 @@ lockfile は手編集しません。
 
 - `@playwright/test` は nixpkgs `playwright-driver`（1.59.1 / `nixos-26.05`）と整合させる必要があるため、**Dependabot の自動更新から除外**しています。上げる場合は `flake.nix` の nixpkgs と `package.json` を同時に更新してください。
 - `@types/node` は Node 24 ランタイムに合わせて **major 更新を無視**しています。
-- `nix` エコシステムは **コミットされた `flake.lock` が必要**です。それまではエントリだけ用意してあり、Dependabot が bump する対象はありません。`flake.lock` をコミットすると有効になります。
+- `nix` エコシステムはコミット済みの `flake.lock` を更新対象にします。
 - バージョン更新は `cooldown.default-days: 7` で 7 日待ちます（pnpm `minimumReleaseAge: 10080` と同じ方針）。セキュリティ更新は cooldown の対象外で、追加のキーは不要です（公式挙動）。
 
 ---
