@@ -4,20 +4,32 @@
   "private": true,
   "type": "module",
   "packageManager": "pnpm@10.34.6",
+  "engines": {
+    "node": "^24",
+    "pnpm": "^10.34.6"
+  },
   "scripts": {
     "dev": "wxt",
     "build": "wxt build",
     "zip": "wxt zip",
     "typecheck": "wxt prepare && tsc --noEmit",
-    "lint": "biome check .",
+    "lint": "biome ci .",
     "lint:fix": "biome check --write .",
+    "fix": "biome check --write .",
     "test": "vitest run",
-    "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
     "test:e2e": "pnpm build && playwright test",
-    "prepare": "sh -c 'if [ -d .git ]; then lefthook install; else echo \"skipping lefthook install: no .git directory\"; fi'",
-    "fallow": "fallow dead-code && fallow architecture --cycles && fallow dupes && fallow health --score --complexity",
-    "fallow:audit": "fallow audit --base origin/main"
+    "fallow": "fallow dead-code && fallow architecture && fallow dupes && fallow health --score --complexity",
+    "fallow:audit": "fallow audit --base origin/main",
+    "settings:check": "bash scripts/github-settings.sh --check",
+    "settings:apply": "bash scripts/github-settings.sh --apply",
+    "dedupe:check": "pnpm dedupe --check",
+    "audit": "pnpm audit --audit-level moderate",
+    "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm fallow",
+    "check:all": "pnpm check && pnpm test:coverage && pnpm build && pnpm test:e2e && pnpm dedupe:check && pnpm audit",
+    "clean": "rm -rf .output .wxt coverage playwright-report test-results",
+    "prepare": "sh -c 'if [ -d .git ]; then lefthook install; else echo \"skipping lefthook install: no .git directory\"; fi'"
   },
   "dependencies": {
     "effect": "4.1.2"

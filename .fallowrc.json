@@ -3,6 +3,59 @@
   "ignorePatterns": [".output/**", ".wxt/**", "coverage/**"],
   "rules": {
     "unused-dev-dependencies": "error",
-    "circular-dependencies": "error"
+    "circular-dependencies": "error",
+    "boundary-violation": "error"
+  },
+  "boundaries": {
+    "zones": [
+      {
+        "name": "unit-tests",
+        "patterns": ["src/**/*.test.ts", "src/**/*.spec.ts"]
+      },
+      {
+        "name": "core",
+        "patterns": ["src/core/**"]
+      },
+      {
+        "name": "services",
+        "patterns": ["src/services/**"]
+      },
+      {
+        "name": "layers",
+        "patterns": ["src/layers/**"]
+      },
+      {
+        "name": "entrypoints",
+        "patterns": ["src/entrypoints/**"]
+      }
+    ],
+    "rules": [
+      { "from": "core", "allow": ["core"] },
+      { "from": "services", "allow": ["core", "services"] },
+      { "from": "layers", "allow": ["core", "services", "layers"] },
+      { "from": "entrypoints", "allow": ["layers", "services", "entrypoints"] },
+      {
+        "from": "unit-tests",
+        "allow": ["core", "services", "layers", "unit-tests"]
+      }
+    ],
+    "coverage": {
+      "requireAllFiles": true,
+      "allowUnmatched": ["e2e/**", "*.config.ts", "scripts/**"]
+    },
+    "calls": {
+      "forbidden": [
+        {
+          "from": "core",
+          "callee": [
+            "Date.now",
+            "Math.random",
+            "chrome.*",
+            "browser.*",
+            "globalThis.chrome"
+          ]
+        }
+      ]
+    }
   }
 }

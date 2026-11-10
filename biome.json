@@ -12,7 +12,11 @@
       "!**/.wxt",
       "!**/coverage",
       "!**/node_modules",
-      "!**/*.md"
+      "!**/*.md",
+      "!**/pnpm-lock.yaml",
+      "!**/.github/workflows/actions.lock",
+      "!**/flake.lock",
+      "!**/package-lock.json"
     ]
   },
   "formatter": {
@@ -21,12 +25,40 @@
     "indentWidth": 2,
     "lineWidth": 80
   },
+  "assist": {
+    "enabled": true,
+    "actions": {
+      "source": {
+        "organizeImports": "on"
+      }
+    }
+  },
   "linter": {
     "enabled": true,
     "rules": {
       "preset": "recommended",
+      "suspicious": {
+        "noExplicitAny": "error",
+        "noImplicitAnyLet": "error",
+        "noConsole": "error",
+        "noTsIgnore": "error",
+        "noImportCycles": "error"
+      },
       "style": {
-        "noNonNullAssertion": "off"
+        "noNonNullAssertion": "error",
+        "useImportType": "error",
+        "useExportType": "error",
+        "noDefaultExport": "error",
+        "noNamespace": "error",
+        "noCommonJs": "error",
+        "useNodejsImportProtocol": "error"
+      },
+      "performance": {
+        "noReExportAll": "error"
+      },
+      "correctness": {
+        "noUnusedImports": "error",
+        "noUnusedVariables": "error"
       }
     }
   },
@@ -35,5 +67,110 @@
       "quoteStyle": "double",
       "semicolons": "always"
     }
-  }
+  },
+  "overrides": [
+    {
+      "includes": [
+        "src/entrypoints/background.ts",
+        "src/entrypoints/content.ts",
+        "wxt.config.ts",
+        "vitest.config.ts",
+        "playwright.config.ts"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "noDefaultExport": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": [
+        "src/core/**",
+        "!src/core/**/*.test.ts",
+        "!src/core/**/*.spec.ts"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedGlobals": {
+              "level": "error",
+              "options": {
+                "deniedGlobals": {
+                  "chrome": "src/core is pure: do not use the chrome global. Inject I/O via parameters.",
+                  "browser": "src/core is pure: do not use the WXT browser global."
+                }
+              }
+            },
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "wxt": "src/core must not import WXT.",
+                  "chrome": "src/core must not import chrome."
+                },
+                "patterns": [
+                  {
+                    "group": [
+                      "wxt",
+                      "wxt/**",
+                      "**/layers/**",
+                      "**/services/**",
+                      "**/entrypoints/**"
+                    ],
+                    "message": "src/core may not import chrome/WXT, layers, services, or entrypoints."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": [
+        "src/services/**",
+        "!src/services/**/*.test.ts",
+        "!src/services/**/*.spec.ts"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": ["**/layers/**", "**/entrypoints/**"],
+                    "message": "src/services must not import layers or entrypoints."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["src/entrypoints/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": ["**/core/**"],
+                    "message": "entrypoints must not import src/core directly; go through layers or services."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
 }

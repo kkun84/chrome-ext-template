@@ -8,10 +8,10 @@ Windows + WSL で開発し、Windows 側の Chrome に unpacked 拡張として�
 - **TypeScript 7.0.2** — Go ネイティブの `tsc`（型チェック専用。TS JS API は不要）
 - **Vitest 5** — `src/core` の純関数ユニットテスト（カバレッジは `@vitest/coverage-v8`）
 - **Playwright 1.59.1** — ビルド済み拡張の E2E（nixpkgs `playwright-driver` と一致させるため固定）
-- **Biome 2.6.4** — lint / format
-- **fallow 3.38.1** — デッドコード / 循環依存 / 重複 / ヘルススコアの解析
+- **Biome 2.6.4** — lint / format（`pnpm lint` = `biome ci`、assist で import 整理）
+- **fallow 3.38.1** — デッドコード / 循環依存 / 重複 / ヘルススコア / アーキテクチャ境界の解析
 - **lefthook 2.2.1** — Git フック（pre-commit / pre-push）
-- **Nix flake** — Node 24 / pnpm / Playwright Chromium を固定
+- **Nix flake** — Node 24 / pnpm / Playwright Chromium / shellcheck / actionlint を固定
 - **GitHub Actions CI** — lint / fallow / typecheck / test / build / e2e / nix / verify-lockfile / CodeQL / dependency-review
 
 ---
@@ -149,13 +149,13 @@ Nix 外でローカル検証する場合のみ `CHROME_PATH=/usr/bin/google-chro
 
 | ジョブ               | 内容                                                                 |
 | -------------------- | -------------------------------------------------------------------- |
-| `lint`               | `pnpm lint`（Biome）                                                 |
-| `fallow`             | `pnpm fallow`（デッドコード / 循環依存 / 重複 / ヘルス）。PR では `fallow audit --gate new-only` も実行 |
+| `lint`               | `pnpm lint`（`biome ci`）。続けて `pnpm dedupe:check` と `pnpm audit` を実行 |
+| `fallow`             | `pnpm fallow`（デッドコード / 循環依存 / 重複 / ヘルス / 境界）。PR では `fallow audit --gate new-only` も実行 |
 | `typecheck`          | `pnpm typecheck`（`wxt prepare && tsc --noEmit`）                    |
 | `test`               | `pnpm test:coverage` → カバレッジ artifact `coverage`                |
 | `build`              | `pnpm build` + `pnpm zip` → artifact `chrome-mv3-unpacked` / `chrome-mv3-zip` |
 | `e2e`                | `pnpm exec playwright install --with-deps chromium` → `pnpm test:e2e`。失敗時のみ `test-results/` と HTML レポートを artifact 化 |
-| `nix`                | `nix flake check` と `devShell` の realize（後述）                   |
+| `nix`                | `nix flake check` と `devShell` の realize、`shellcheck scripts/*.sh && actionlint`（後述） |
 | `verify-lockfile`    | `.github/workflows/actions.lock` を `gh actions-lock --verify` で検証（`verify-lockfile.yml`）。`ci.yml` / `codeql.yml` / `dependency-review.yml` / `verify-lockfile.yml` を対象にする |
 | `CodeQL`             | `codeql.yml`。`javascript-typescript` と `actions` を解析（`main` への push/PR、および毎週） |
 | `dependency-review`  | `dependency-review.yml`。`pull_request` で依存をレビューし、`fail-on-severity: moderate` |
@@ -165,13 +165,20 @@ Nix 外でローカル検証する場合のみ `CHROME_PATH=/usr/bin/google-chro
 
   ```bash
   pnpm install --frozen-lockfile
-  pnpm lint && pnpm fallow && pnpm typecheck && pnpm test:coverage
+  pnpm check          # lint + typecheck + test + fallow
+  pnpm test:coverage
   pnpm build && pnpm zip
   pnpm exec playwright install --with-deps chromium   # 初回のみ
   pnpm test:e2e
   ```
 
-- **Nix ジョブ** はコミット済みの `flake.lock` を使います。`nixpkgs` は `nixos-26.05` の、7 日以上経過した rev に固定されています。
+  まとめて実行する場合は `pnpm check:all`（`check` + `test:coverage` + `build` +
+  `test:e2e` + `dedupe:check` + `audit`）を使います。
+
+- **Nix ジョブ** はコミット済みの `flake.lock` を使います。`nixpkgs` は
+  `nixos-26.05` の、7 日以上経過した rev に固定されています。devShell には
+  `shellcheck` と `actionlint` が入っており、CI の `nix` ジョブが
+  `nix develop --command sh -c 'shellcheck scripts/*.sh && actionlint'` を実行します。
 - Playwright は **1.59.1 に固定** し、nixpkgs `playwright-driver` と一致させています（[Playwright のバージョン整合](#playwright-のバージョン整合) 参照）。
 - **CodeQL**（`codeql.yml`）と **dependency review**（`dependency-review.yml`）もこのテンプレートに含まれます。ワークフローを変えたら `gh actions-lock` で lockfile を更新し、`verify-lockfile` で検証してください。
 
@@ -213,17 +220,21 @@ lockfile は手編集しません。
 
 ---
 
-## fallow（デッドコード / 循環依存 / 重複 / ヘルス）
+## fallow（デッドコード / 循環依存 / 重複 / ヘルス / 境界）
 
-[fallow](https://fallow.tools/) で未使用エクスポート、循環依存、重複、ヘルススコアを検査します。
+[fallow](https://fallow.tools/) で未使用エクスポート、循環依存、重複、ヘルススコア、
+**アーキテクチャ境界**を検査します。
 
 ```bash
-pnpm fallow          # dead-code + architecture --cycles + dupes + health
+pnpm fallow          # dead-code + architecture（cycles / boundaries / policy）+ dupes + health
 pnpm fallow:audit    # origin/main 基準の差分監査（新規の問題のみ）
 ```
 
-- 設定は [`.fallowrc.json`](./.fallowrc.json)。`unused-dev-dependencies` と
-  `circular-dependencies` を `error` にしています。
+- 設定は [`.fallowrc.json`](./.fallowrc.json)。`unused-dev-dependencies` /
+  `circular-dependencies` / `boundary-violation` を `error` にしています。
+- `boundaries` でレイヤー方向（`entrypoints → layers / services → core`）を強制します。
+  `src/core` ゾーンでは `Date.now` / `Math.random` / `chrome.*` / `browser.*` /
+  `globalThis.chrome` の呼び出しも禁止します。
 - `entry` は指定しません。WXT プラグインがエントリポイントを自動検出します。
 - `fallow` は **3.38.1 に固定**しています。7 日ポリシーにより、
   `>=3.42.0`（`GHSA-rg8g-qqf6-7q69` と `GHSA-h858-c8f4-h92c`、いずれも Low を修正）へは
@@ -236,7 +247,7 @@ pnpm fallow:audit    # origin/main 基準の差分監査（新規の問題のみ
 - フックは `prepare` スクリプト（`pnpm install` → `lefthook install`）でインストールされます。
 - フックをスキップするには `LEFTHOOK=0` を設定します（例: `LEFTHOOK=0 git commit ...`）。
 - `pre-commit` は staged の対象ファイルに `biome check --write` を実行し、修正を stage します。
-- `pre-push` は `fallow audit --base origin/main --quiet` を実行します（`origin/main` が無い場合はスキップ）。
+- `pre-push` は `pnpm check`（lint + typecheck + test + fallow）を実行します。
 - 設定は [`lefthook.yml`](./lefthook.yml)。
 - `lefthook` は `2.2.1` に固定しています。npm provenance を持ち、かつ 7 日ポリシーを満たす後続リリースが出るまでは `2.2.1` のままにします（その条件を満たした時点で上げます）。
 
@@ -298,14 +309,22 @@ pnpm fallow:audit    # origin/main 基準の差分監査（新規の問題のみ
 | `pnpm build`      | 本番ビルド（`.output/chrome-mv3`） |
 | `pnpm zip`        | 配布用 zip を作成                  |
 | `pnpm typecheck`  | `wxt prepare` + `tsc --noEmit`     |
-| `pnpm lint`       | Biome でチェック                   |
+| `pnpm lint`       | `biome ci`（format + lint + assist）|
 | `pnpm lint:fix`   | Biome で自動修正                   |
+| `pnpm fix`        | `lint:fix` の別名（Biome 自動修正）|
 | `pnpm test`       | Vitest ユニットテスト              |
 | `pnpm test:coverage` | Vitest + カバレッジ（text/lcov/html → `coverage/`） |
 | `pnpm test:watch` | Vitest ウォッチ                    |
 | `pnpm test:e2e`   | ビルド + Playwright E2E            |
-| `pnpm fallow`     | fallow でデッドコード / 循環依存 / 重複 / ヘルスを解析 |
+| `pnpm fallow`     | fallow でデッドコード / 循環依存 / 重複 / ヘルス / 境界を解析 |
 | `pnpm fallow:audit` | `origin/main` を基準にした fallow 監査（新規のみ） |
+| `pnpm check`      | `lint` + `typecheck` + `test` + `fallow` |
+| `pnpm check:all`  | `check` + `test:coverage` + `build` + `test:e2e` + `dedupe:check` + `audit` |
+| `pnpm clean`      | 生成物（`.output` / `.wxt` / `coverage` 等）を削除 |
+| `pnpm dedupe:check` | `pnpm dedupe --check`            |
+| `pnpm audit`      | `pnpm audit --audit-level moderate`|
+| `pnpm settings:check` | GitHub 設定のドリフトを検出（読み取り専用）|
+| `pnpm settings:apply` | GitHub 設定を適用               |
 
 ---
 
