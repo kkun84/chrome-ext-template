@@ -67,13 +67,13 @@ Actions 実行ページの Artifacts から取得できます。
 （`fail-on-severity: moderate`）。
 ローカルで同じ検証をする場合は上記スクリプトをそのまま実行してください。
 
-- **Nix ジョブ** は `nixos-26.05` を実行時に解決します。`flake.lock` は意図的に
-  未コミットです（作成時に Nix が無かったため）。`nix flake lock` で生成して
-  コミットすると再現可能になり推奨です。
+- **Nix ジョブ** はコミット済みの `flake.lock` を使います。`nixpkgs` は
+  `nixos-26.05` の、ロック時点で 7 日以上経過した rev に固定しています
+  （`flake.nix` の入力 URL は `github:NixOS/nixpkgs/nixos-26.05` のまま）。
 - **Dependabot**（`.github/dependabot.yml`）が毎週 npm / github-actions / nix を更新。
   `@playwright/test` は nixpkgs `playwright-driver`（1.59.1）と整合が必要なため
-  自動更新から除外しています。nix エコシステムは `flake.lock` をコミットするまで
-  更新対象が無いため、エントリだけ用意しています。
+  自動更新から除外しています。nix エコシステムはコミット済みの `flake.lock` を
+  更新対象にします。
 - **TypeScript 7**（`tsc` のみ、JS API 不使用）。Vite 8 / WXT は TS API を必要と
   しません。`vite@8.3.5` は WXT の必須 peer として直接 devDependency に追加。
 - **サプライチェーン**: pnpm は `minimumReleaseAge: 10080` / install スクリプト
