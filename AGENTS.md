@@ -50,8 +50,66 @@ pnpm typecheck    # wxt prepare + tsc
 pnpm lint         # Biome
 pnpm lint:fix     # Biome 自動修正
 pnpm test         # Vitest
+pnpm test:coverage # Vitest + カバレッジ
 pnpm test:e2e     # ビルド + Playwright
 ```
+
+## CI（GitHub Actions）
+
+`.github/workflows/ci.yml` が `push` / `pull_request` で `lint` / `typecheck` /
+`test`（カバレッジ）/ `build` / `e2e` / `nix` を実行します。artifact
+（カバレッジ・拡張の unpacked/zip・失敗時の Playwright trace/screenshot）は
+Actions 実行ページの Artifacts から取得できます。
+`.github/workflows/verify-lockfile.yml` が `actions.lock` の整合性を検証します。
+ローカルで同じ検証をする場合は上記スクリプトをそのまま実行してください。
+
+- **Nix ジョブ** は `nixos-26.05` を実行時に解決します。`flake.lock` は意図的に
+  未コミットです（作成時に Nix が無かったため）。`nix flake lock` で生成して
+  コミットすると再現可能になり推奨です。
+- **Dependabot**（`.github/dependabot.yml`）が毎週 npm / github-actions / nix を更新。
+  `@playwright/test` は nixpkgs `playwright-driver`（1.59.1）と整合が必要なため
+  自動更新から除外しています。nix エコシステムは `flake.lock` をコミットするまで
+  更新対象が無いため、エントリだけ用意しています。
+- **TypeScript 7**（`tsc` のみ、JS API 不使用）。Vite 8 / WXT は TS API を必要と
+  しません。`vite@8.3.7` は WXT の必須 peer として直接 devDependency に追加。
+- **サプライチェーン**: pnpm は `minimumReleaseAge: 10080` / install スクリプト
+  ブロック（`onlyBuiltDependencies`）/ `trustPolicy: no-downgrade` /
+  `blockExoticSubdeps: true` を `pnpm-workspace.yaml` に設定。CI は
+  `pnpm install --frozen-lockfile`。GitHub Actions の `uses:` は**可読な
+  バージョンタグ**（例: `actions/checkout@v7.0.1`）で書き、実行時の pin は
+  GA のワークフロー依存ロックファイル `.github/workflows/actions.lock`
+  （`gh actions-lock`、GA 2026-10-28）に委ねます。最小権限（`contents: read`、
+  artifact を上げるジョブのみ `actions: write`）、`actions/checkout` は
+  `persist-credentials: false`。`pull_request_target` は使用しません。
+
+### ワークフローのロックファイル（`actions.lock`）
+
+`.github/workflows/` 配下のワークフローを変更したら、**同じ変更の中で**
+`.github/workflows/actions.lock` を作り直してください。lockfile は手編集禁止です。
+
+```bash
+gh extension install github/gh-actions-lock --pin v0.4.1
+gh actions-lock                 # actions.lock を生成 / 更新
+gh actions-lock --verify        # 検証（ネットワークが必要）
+gh actions-lock --verify-local  # オフラインで検証
+```
+
+生成した `.github/workflows/actions.lock` はワークフローの変更と一緒にコミットします。
+
+### 7 日ポリシー
+
+公開直後のサプライチェーン攻撃を避けるため、バージョン更新は 7 日待ちます。
+
+- pnpm: `minimumReleaseAge: 10080`（分）
+- Dependabot: `cooldown.default-days: 7`（**バージョン更新のみ**。セキュリティ
+  更新は cooldown の対象外で、追加キーは不要）
+
+### その他のツール
+
+- 大きな変更では任意で `gh stack`（`gh extension install github/gh-stack`）を
+  使えますが、必須ではありません。
+- Issue artifact（`gh issue artifact`）は **preview** です。必須にしないでください。
+- `.github/agents/` や 2 つ目の長い `.github/copilot-instructions.md` は追加しないでください。
 
 ## 依存とバージョン
 

@@ -5,10 +5,12 @@ Windows + WSL で開発し、Windows 側の Chrome に unpacked 拡張として�
 
 - **WXT 0.21.5** — ビルド / 開発サーバ / manifest 生成
 - **Effect 4.1.3** — ドメインロジック・依存注入（Functional Core / Imperative Shell）
-- **Vitest 5** — `src/core` の純関数ユニットテスト
-- **Playwright 1.59.1** — ビルド済み拡張の E2E スモーク
+- **TypeScript 7.0.2** — Go ネイティブの `tsc`（型チェック専用。TS JS API は不要）
+- **Vitest 5** — `src/core` の純関数ユニットテスト（カバレッジは `@vitest/coverage-v8`）
+- **Playwright 1.59.1** — ビルド済み拡張の E2E（nixpkgs `playwright-driver` と一致させるため固定）
 - **Biome 2.6.6** — lint / format
 - **Nix flake** — Node 24 / pnpm / Playwright Chromium を固定
+- **GitHub Actions CI** — lint / typecheck / test / build / e2e / nix / verify-lockfile
 
 ---
 
@@ -130,6 +132,109 @@ Nix 外でローカル検証する場合のみ `CHROME_PATH=/usr/bin/google-chro
 
 ---
 
+## TypeScript 7
+
+`typescript@7.0.2`（Go ネイティブコンパイラ）を使用しています。
+
+- TS 7 は **型チェック専用** で、プログラム用 JS API を提供しません（JS API は 7.1 で予定、現在 beta のため未使用）。
+- WXT 0.21.5 は `typescript` を peer として要求しますが、その JS は `typescript` を `import` しません（`wxt prepare` は型/tsconfig を生成するだけ）。Vite 8 は Oxc/rolldown でトランスパイルするため TS API も不要です。
+- `vite@8.3.7` は WXT の必須 peer のため、直接 devDependency として追加しています（推移的にも解決済み）。
+- `tsconfig.json` は `baseUrl` を設定しません（WXT 生成の `.wxt/tsconfig.json` が `paths` を持ちます）。TS 7 は CSS の副作用 import に厳しいため、`types` に `vite/client` を追加しています。
+
+---
+
+## CI（GitHub Actions）
+
+`.github/workflows/ci.yml` が `push` / `pull_request` で以下を実行します（すべて `ubuntu-latest` / Node 24）。
+
+| ジョブ               | 内容                                                                 |
+| -------------------- | -------------------------------------------------------------------- |
+| `lint`               | `pnpm lint`（Biome）                                                 |
+| `typecheck`          | `pnpm typecheck`（`wxt prepare && tsc --noEmit`）                    |
+| `test`               | `pnpm test:coverage` → カバレッジ artifact `coverage`                |
+| `build`              | `pnpm build` + `pnpm zip` → artifact `chrome-mv3-unpacked` / `chrome-mv3-zip` |
+| `e2e`                | `pnpm exec playwright install --with-deps chromium` → `pnpm test:e2e`。失敗時のみ `test-results/` と HTML レポートを artifact 化 |
+| `nix`                | `nix flake check` と `devShell` の realize（後述）                   |
+| `verify-lockfile`    | `.github/workflows/actions.lock` を `gh actions-lock --verify` で検証（`verify-lockfile.yml`） |
+
+- artifact は各ジョブの **Actions 実行ページ → Artifacts** からダウンロードできます。
+- ローカルで同じ検証をするには:
+
+  ```bash
+  pnpm install --frozen-lockfile
+  pnpm lint && pnpm typecheck && pnpm test:coverage
+  pnpm build && pnpm zip
+  pnpm exec playwright install --with-deps chromium   # 初回のみ
+  pnpm test:e2e
+  ```
+
+- **Nix ジョブ** は `nixos-26.05` を実行時に解決します。このリポジトリは **`flake.lock` をコミットしていません**（作成時に Nix が無かったため）。Nix のあるマシンで `nix flake lock` を実行して `flake.lock` をコミットすると、CI が完全に再現可能になり推奨されます。
+- Playwright は **1.59.1 に固定** し、nixpkgs `playwright-driver` と一致させています（[Playwright のバージョン整合](#playwright-のバージョン整合) 参照）。
+- **CodeQL / dependency review はこのテンプレートに入れていません。** 個人 Free のプライベートリポジトリでは使えないためです。公開化、または GitHub Code Security の導入後に検討してください。
+
+### ワークフローのロックファイル（`actions.lock`）
+
+`uses:` は **可読なバージョンタグ**（例: `actions/checkout@v7.0.1`）で書きます。
+実行時の pin は GA のワークフロー依存ロックファイル
+`.github/workflows/actions.lock`（`gh actions-lock`、GA 2026-10-28）が担います。
+lockfile は **手編集しないでください**。
+
+`.github/workflows/` 配下のワークフローを変えたら、**同じ変更の中で**作り直します。
+
+```bash
+gh extension install github/gh-actions-lock --pin v0.4.1
+gh actions-lock                 # actions.lock を生成 / 更新
+gh actions-lock --verify        # 検証（ネットワークが必要）
+gh actions-lock --verify-local  # オフラインで検証
+```
+
+#### One-time `actions.lock` 生成（まだファイルが無い場合）
+
+```bash
+gh extension install github/gh-actions-lock --pin v0.4.1
+gh actions-lock
+git add .github/workflows/actions.lock
+```
+
+ワークフローを変えたら同じコマンドで作り直し、その変更と一緒にコミットします。
+lockfile は手編集しません。
+
+### Dependabot
+
+`.github/dependabot.yml` が毎週 `npm` / `github-actions` / `nix` の更新 PR を作成します（グループ化済み）。
+
+- `@playwright/test` は nixpkgs `playwright-driver`（1.59.1 / `nixos-26.05`）と整合させる必要があるため、**Dependabot の自動更新から除外**しています。上げる場合は `flake.nix` の nixpkgs と `package.json` を同時に更新してください。
+- `@types/node` は Node 24 ランタイムに合わせて **major 更新を無視**しています。
+- `nix` エコシステムは **コミットされた `flake.lock` が必要**です。それまではエントリだけ用意してあり、Dependabot が bump する対象はありません。`flake.lock` をコミットすると有効になります。
+- バージョン更新は `cooldown.default-days: 7` で 7 日待ちます（pnpm `minimumReleaseAge: 10080` と同じ方針）。セキュリティ更新は cooldown の対象外で、追加のキーは不要です（公式挙動）。
+
+---
+
+## サプライチェーン / セキュリティ
+
+- **pnpm 設定**（`pnpm-workspace.yaml`）:
+  - `minimumReleaseAge: 10080`（7 日）— 公開直後のパッケージを拒否。テンプレート自身の pin（`effect` / `@biomejs/biome` / `vite` とその `@biomejs/cli-*`）はスナップショット時点で 7 日以内だったため `minimumReleaseAgeExclude` で除外（理由はファイル内にコメント）。
+  - `onlyBuiltDependencies: []` — install スクリプトは既定でブロック。現在のツリーにビルドが必要なパッケージはありません。
+  - `trustPolicy: no-downgrade` / `blockExoticSubdeps: true`。
+  - 常に `pnpm-lock.yaml` をコミットし、CI は `pnpm install --frozen-lockfile` を使用。
+- **GitHub Actions**:
+  - `uses:` は**可読なバージョンタグ**（例: `actions/checkout@v7.0.1`）で書き、実行時の pin は GA のワークフロー依存ロックファイル `.github/workflows/actions.lock`（`gh actions-lock`）で管理。lockfile は手編集しない。
+  - 権限は最小（`contents: read`、artifact を上げるジョブのみ `actions: write`）。`actions/checkout` は `persist-credentials: false`。
+  - `pull_request_target` は使用しません。CodeQL / dependency review は入れていません（個人 Free のプライベートリポジトリでは使えないため）。
+
+---
+
+## リポジトリ設定チェックリスト
+
+以下はファイルでは設定できません。リポジトリの Settings から手動で行ってください。
+
+1. **Settings → Advanced Security**: Dependabot alerts、Dependabot security updates、Dependabot malware alerts をオンにする。
+2. **`.github/workflows/actions.lock` をコミットし、`verify-lockfile` ジョブが通ってから** Settings → Actions → Policies で **Require lockfile** を Active にする。lockfile が無い状態で Active にするとワークフローが止まります。Free プランに Evaluate モードはありません。
+3. 拡張を **GitHub Releases** で配るときに **immutable releases** をオンにする。
+4. **CodeQL / dependency review はこのテンプレートに入れていません**（個人 Free のプライベートリポジトリでは使えないため）。公開化、または GitHub Code Security 導入後に検討してください。
+
+---
+
 ## 主なスクリプト
 
 | スクリプト        | 内容                               |
@@ -141,6 +246,7 @@ Nix 外でローカル検証する場合のみ `CHROME_PATH=/usr/bin/google-chro
 | `pnpm lint`       | Biome でチェック                   |
 | `pnpm lint:fix`   | Biome で自動修正                   |
 | `pnpm test`       | Vitest ユニットテスト              |
+| `pnpm test:coverage` | Vitest + カバレッジ（text/lcov/html → `coverage/`） |
 | `pnpm test:watch` | Vitest ウォッチ                    |
 | `pnpm test:e2e`   | ビルド + Playwright E2E            |
 
@@ -157,7 +263,8 @@ src/
   core/               # 純粋ドメイン（chrome 禁止・I/O 禁止）
   services/           # Effect Context タグ（インターフェースのみ）+ ユースケース
   layers/             # Live（chrome.*）実装 / Test（インメモリ）実装
-e2e/                  # Playwright スモーク
+e2e/                  # Playwright E2E（スモーク + URL 保存フロー）
+.github/              # GitHub Actions CI / Dependabot
 ```
 
 ### レイヤーの向き（依存の方向）

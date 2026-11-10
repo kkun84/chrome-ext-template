@@ -6,7 +6,7 @@
   };
 
   outputs =
-    { nixpkgs }:
+    { self, nixpkgs }:
     let
       # Systems we provide a devShell for.
       systems = [
@@ -41,6 +41,13 @@
             PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS = "true";
           };
         };
+      });
+
+      # `nix flake check` builds these. The devShell is the single source of
+      # truth for the toolchain, so we expose it as a check to keep the flake
+      # meaningful without duplicating the Node/pnpm setup.
+      checks = forAllSystems (pkgs: {
+        devShell = self.devShells.${pkgs.stdenv.hostPlatform.system}.default;
       });
     };
 }

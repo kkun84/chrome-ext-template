@@ -1,0 +1,27 @@
+# Verify the GitHub Actions workflow dependency lockfile
+# (`.github/workflows/actions.lock`) using the official `gh actions-lock`
+# extension. Follows the upstream sample:
+# https://github.com/github/gh-actions-lock
+#
+# Triggered on push and pull_request for ALL branches (this template is first
+# pushed as `init-template`, not only `main`).
+name: verify-lockfile
+
+on:
+  pull_request:
+  push:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - run: gh extension install github/gh-actions-lock --pin v0.4.1
+      - run: gh actions-lock --verify

@@ -1,0 +1,210 @@
+# CI for the Chrome MV3 extension template.
+#
+# Triggers on every push and pull request. Jobs are intentionally separate so a
+# failure points at a single concern.
+#
+# Action pins: `uses:` uses readable version tags (e.g. actions/checkout@v7.0.1).
+# Runtime pins come from the GA workflow dependency lockfile
+# `.github/workflows/actions.lock` (`gh actions-lock`, GA 2026-10-28), not from
+# SHAs written in this YAML. Regenerate the lockfile whenever this workflow
+# changes and verify it with `gh actions-lock --verify` (see README / AGENTS.md).
+#
+# CodeQL and dependency-review are intentionally NOT included: neither is
+# available on free personal private repositories. Revisit after making the repo
+# public or adopting GitHub Code Security.
+#
+# Nix note: this repo intentionally does NOT commit a `flake.lock` (Nix was not
+# available when the template was written). The `nix` job therefore resolves
+# `nixos-26.05` from the flake input at run time. Once you commit a
+# `flake.lock`, the job becomes fully reproducible — that is the recommended
+# best practice.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+# Cancel superseded runs on the same ref.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Least privilege by default. Jobs that upload artifacts re-grant `actions:
+# write` below (uploading artifacts requires it).
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: lint (Biome)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6.1.1
+      - name: Set up Node
+        uses: actions/setup-node@v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Lint
+        run: pnpm lint
+
+  typecheck:
+    name: typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6.1.1
+      - name: Set up Node
+        uses: actions/setup-node@v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Typecheck
+        run: pnpm typecheck
+
+  test:
+    name: test (Vitest + coverage)
+    runs-on: ubuntu-latest
+    permissions:
+      # Job-level permissions replace the workflow defaults, so keep
+      # contents: read (checkout) and add actions: write (artifacts).
+      contents: read
+      actions: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6.1.1
+      - name: Set up Node
+        uses: actions/setup-node@v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Unit tests with coverage
+        run: pnpm test:coverage
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: coverage
+          path: coverage/
+          if-no-files-found: error
+
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    permissions:
+      # Job-level permissions replace the workflow defaults, so keep
+      # contents: read (checkout) and add actions: write (artifacts).
+      contents: read
+      actions: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6.1.1
+      - name: Set up Node
+        uses: actions/setup-node@v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build
+        run: pnpm build
+      - name: Zip
+        run: pnpm zip
+      - name: Upload unpacked extension
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: chrome-mv3-unpacked
+          path: .output/chrome-mv3/
+          if-no-files-found: error
+      - name: Upload zip
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: chrome-mv3-zip
+          path: .output/*.zip
+          if-no-files-found: error
+
+  e2e:
+    name: e2e (Playwright)
+    runs-on: ubuntu-latest
+    permissions:
+      # Job-level permissions replace the workflow defaults, so keep
+      # contents: read (checkout) and add actions: write (artifacts).
+      contents: read
+      actions: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6.1.1
+      - name: Set up Node
+        uses: actions/setup-node@v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      # @playwright/test is pinned to 1.59.1 to match nixpkgs `playwright-driver`
+      # (nixos-26.05). Install that exact Chromium build plus OS deps.
+      - name: Install Playwright Chromium
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Run E2E tests
+        run: pnpm test:e2e
+      - name: Upload Playwright traces and screenshots
+        if: failure()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: playwright-test-results
+          path: test-results/
+          if-no-files-found: ignore
+      - name: Upload Playwright HTML report
+        if: failure()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: playwright-report
+          path: playwright-report/
+          if-no-files-found: ignore
+
+  nix:
+    name: nix (flake check + devShell)
+    runs-on: ubuntu-latest
+    # Nix must fetch Playwright Chromium and evaluate nixpkgs, which is slow.
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v23
+      - name: Set up Nix cache
+        uses: DeterminateSystems/magic-nix-cache-action@v15
+      # No `flake.lock` is committed on purpose; Nix resolves nixos-26.05 here.
+      - name: nix flake check
+        run: nix flake check --print-build-logs
+      - name: Realize devShell
+        run: nix build --no-link --print-out-paths .#devShells.x86_64-linux.default

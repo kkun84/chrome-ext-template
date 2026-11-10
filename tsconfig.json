@@ -6,7 +6,7 @@
     "noImplicitOverride": true,
     "noFallthroughCasesInSwitch": true,
     "verbatimModuleSyntax": true,
-    "types": ["node", "chrome"]
+    "types": ["node", "chrome", "vite/client"]
   },
   "include": [
     "src",
