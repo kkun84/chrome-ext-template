@@ -10,7 +10,7 @@ Windows + WSL で開発し、Windows 側の Chrome に unpacked 拡張として�
 - **Playwright 1.59.1** — ビルド済み拡張の E2E（nixpkgs `playwright-driver` と一致させるため固定）
 - **Biome 2.6.4** — lint / format
 - **fallow 3.38.1** — デッドコード / 循環依存 / 重複 / ヘルススコアの解析
-- **lefthook 2.2.2** — Git フック（pre-commit / pre-push）
+- **lefthook 2.2.1** — Git フック（pre-commit / pre-push）
 - **Nix flake** — Node 24 / pnpm / Playwright Chromium を固定
 - **GitHub Actions CI** — lint / fallow / typecheck / test / build / e2e / nix / verify-lockfile / CodeQL / dependency-review
 
@@ -238,6 +238,7 @@ pnpm fallow:audit    # origin/main 基準の差分監査（新規の問題のみ
 - `pre-commit` は staged の対象ファイルに `biome check --write` を実行し、修正を stage します。
 - `pre-push` は `fallow audit --base origin/main --quiet` を実行します（`origin/main` が無い場合はスキップ）。
 - 設定は [`lefthook.yml`](./lefthook.yml)。
+- `lefthook` は `2.2.1` に固定しています。npm provenance を持ち、かつ 7 日ポリシーを満たす後続リリースが出るまでは `2.2.1` のままにします（その条件を満たした時点で上げます）。
 
 ---
 
