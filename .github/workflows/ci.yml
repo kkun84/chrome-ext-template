@@ -98,6 +98,10 @@ jobs:
           cache: pnpm
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+      # tsconfig.json extends .wxt/tsconfig.json, which `wxt prepare` generates.
+      # Without it, Vitest fails to load the config (it exists locally only after prepare).
+      - name: Prepare WXT
+        run: pnpm exec wxt prepare
       - name: Unit tests with coverage
         run: pnpm test:coverage
       - name: Upload coverage report
@@ -144,7 +148,10 @@ jobs:
         uses: actions/upload-artifact@v7.0.2
         with:
           name: chrome-mv3-zip
+          # `.output` is hidden. upload-artifact skips hidden paths unless this
+          # is set, so the `*.zip` glob otherwise matches nothing.
           path: .output/*.zip
+          include-hidden-files: true
           if-no-files-found: error
 
   e2e:
