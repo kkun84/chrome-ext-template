@@ -43,7 +43,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Set up pnpm
-        uses: pnpm/action-setup@v6.1.0
+        uses: pnpm/action-setup@v6.1.1
       - name: Set up Node
         uses: actions/setup-node@v7.1.0
         with:
@@ -72,7 +72,7 @@ jobs:
           # the base branch on pull_request.
           fetch-depth: 0
       - name: Set up pnpm
-        uses: pnpm/action-setup@v6.1.0
+        uses: pnpm/action-setup@v6.1.1
       - name: Set up Node
         uses: actions/setup-node@v7.1.0
         with:
@@ -95,7 +95,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Set up pnpm
-        uses: pnpm/action-setup@v6.1.0
+        uses: pnpm/action-setup@v6.1.1
       - name: Set up Node
         uses: actions/setup-node@v7.1.0
         with:
@@ -120,7 +120,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Set up pnpm
-        uses: pnpm/action-setup@v6.1.0
+        uses: pnpm/action-setup@v6.1.1
       - name: Set up Node
         uses: actions/setup-node@v7.1.0
         with:
@@ -156,7 +156,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Set up pnpm
-        uses: pnpm/action-setup@v6.1.0
+        uses: pnpm/action-setup@v6.1.1
       - name: Set up Node
         uses: actions/setup-node@v7.1.0
         with:
@@ -198,7 +198,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Set up pnpm
-        uses: pnpm/action-setup@v6.1.0
+        uses: pnpm/action-setup@v6.1.1
       - name: Set up Node
         uses: actions/setup-node@v7.1.0
         with:
