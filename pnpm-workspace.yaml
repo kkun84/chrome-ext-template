@@ -1,0 +1,43 @@
+# pnpm settings (pnpm 10.34 reads these from pnpm-workspace.yaml).
+#
+# Supply-chain hardening. See README.md / AGENTS.md for the rationale.
+#
+# 1. Refuse packages published less than 7 days ago (10080 minutes). This gives
+#    the ecosystem time to detect compromised releases before we install them.
+#    There is no minimumReleaseAgeExclude list: every resolved package,
+#    including direct pins, must already be at least 7 days old. Direct pins
+#    are the newest stable versions that meet that gate.
+minimumReleaseAge: 10080
+
+# 2. Block install scripts by default; allow only packages that genuinely need
+#    a build step. Inspecting the current tree (`pnpm-lock.yaml`) shows no
+#    package with a `requiresBuild`/postinstall hook (Vite 8 builds with
+#    rolldown/oxc, not esbuild), so the allowlist is intentionally empty.
+#    Add a name here only if `pnpm install` reports an ignored build.
+onlyBuiltDependencies: []
+
+# 3. Refuse dependency downgrades (e.g. a malicious "newer" version that is
+#    actually older / a lower trust level).
+trustPolicy: no-downgrade
+
+# 4. Block exotic transitive dependencies (git/tarball/URL subdeps), which are
+#    a common malware vector and are never needed here.
+blockExoticSubdeps: true
+
+# Keep the lockfile authoritative in CI via `pnpm install --frozen-lockfile`.
+
+# Transitive pins: newest stable already published >=7 days (as of 2026-11-10
+# JST) that still satisfies parent ranges. Do not use minimumReleaseAgeExclude.
+# - rolldown: vite@8.3.5 wants ~1.2.14; 1.2.18 is too new → 1.2.16
+# - @babel/helper-string-parser / @babel/parser: 7.29.13 is too new
+# - @rolldown/pluginutils: 1.1.0 is too new; unplugin allows ^1.0.1
+# - ast-v8-to-istanbul: coverage-v8 allows ^1.0.7; 1.0.8 is too new
+# - filesize / superlock: wxt ranges allow these; latest patches were too new
+overrides:
+  rolldown: 1.2.16
+  "@babel/helper-string-parser": 7.29.11
+  "@babel/parser": 7.29.12
+  "@rolldown/pluginutils": 1.0.1
+  ast-v8-to-istanbul: 1.0.7
+  filesize: 11.0.29
+  superlock: 1.4.13

@@ -18,6 +18,9 @@ export default defineConfig({
   workers: 1,
   reporter: process.env.CI ? "list" : [["list"], ["html", { open: "never" }]],
   use: {
-    trace: "on-first-retry",
+    // Keep traces and screenshots only when a test fails so CI can upload them
+    // without inflating artifacts on green runs.
+    trace: "retain-on-failure",
+    screenshot: "only-on-failure",
   },
 });

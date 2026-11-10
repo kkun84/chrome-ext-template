@@ -1,0 +1,55 @@
+# Dependabot configuration.
+#
+# NOTE: `@playwright/test` MUST stay aligned with the `playwright-driver`
+# version provided by nixpkgs `nixos-26.05` (currently 1.59.1). Do not let
+# Dependabot silently major-bump Playwright on its own — bump the flake's
+# nixpkgs input and `@playwright/test` together. Playwright is therefore listed
+# under an ignored update rule below.
+#
+# Cooldown: every ecosystem waits `default-days: 7` before opening a version
+# update PR (matches pnpm `minimumReleaseAge: 10080`). Security updates are NOT
+# delayed by cooldown (official behavior; no extra key needed).
+#
+# Nix: the `nix` ecosystem needs a committed `flake.lock` to have anything to
+# bump. This repo intentionally does not commit one yet, so the entry is ready
+# but Dependabot currently has nothing to do here. Commit `flake.lock` (via
+# `nix flake lock`) to activate it.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    cooldown:
+      default-days: 7
+    groups:
+      npm-production:
+        dependency-type: production
+      npm-development:
+        dependency-type: development
+    ignore:
+      # Keep in lockstep with nixpkgs playwright-driver (nixos-26.05 / 1.59.1).
+      - dependency-name: "@playwright/test"
+      # Stay on Node 24 types to match the Node 24 runtime / flake.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    cooldown:
+      default-days: 7
+    groups:
+      github-actions:
+        patterns: ["*"]
+
+  - package-ecosystem: nix
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    cooldown:
+      default-days: 7
