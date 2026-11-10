@@ -9,9 +9,10 @@
 # SHAs written in this YAML. Regenerate the lockfile whenever this workflow
 # changes and verify it with `gh actions-lock --verify` (see README / AGENTS.md).
 #
-# CodeQL and dependency-review are intentionally NOT included: neither is
-# available on free personal private repositories. Revisit after making the repo
-# public or adopting GitHub Code Security.
+# Companion workflows (also covered by actions.lock / verify-lockfile):
+#   .github/workflows/codeql.yml             — CodeQL (JS/TS + Actions)
+#   .github/workflows/dependency-review.yml  — dependency review on pull_request
+#   .github/workflows/verify-lockfile.yml    — gh actions-lock --verify
 #
 # Nix note: this repo intentionally does NOT commit a `flake.lock` (Nix was not
 # available when the template was written). The `nix` job therefore resolves

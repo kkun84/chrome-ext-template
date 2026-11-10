@@ -60,7 +60,11 @@ pnpm test:e2e     # ビルド + Playwright
 `test`（カバレッジ）/ `build` / `e2e` / `nix` を実行します。artifact
 （カバレッジ・拡張の unpacked/zip・失敗時の Playwright trace/screenshot）は
 Actions 実行ページの Artifacts から取得できます。
-`.github/workflows/verify-lockfile.yml` が `actions.lock` の整合性を検証します。
+`.github/workflows/verify-lockfile.yml` が `actions.lock` の整合性を検証します
+（`ci.yml` / `codeql.yml` / `dependency-review.yml` / `verify-lockfile.yml` を含む）。
+`.github/workflows/codeql.yml` が `javascript-typescript` と `actions` を解析し、
+`.github/workflows/dependency-review.yml` が `pull_request` で依存をレビューします
+（`fail-on-severity: moderate`）。
 ローカルで同じ検証をする場合は上記スクリプトをそのまま実行してください。
 
 - **Nix ジョブ** は `nixos-26.05` を実行時に解決します。`flake.lock` は意図的に
@@ -71,7 +75,7 @@ Actions 実行ページの Artifacts から取得できます。
   自動更新から除外しています。nix エコシステムは `flake.lock` をコミットするまで
   更新対象が無いため、エントリだけ用意しています。
 - **TypeScript 7**（`tsc` のみ、JS API 不使用）。Vite 8 / WXT は TS API を必要と
-  しません。`vite@8.3.7` は WXT の必須 peer として直接 devDependency に追加。
+  しません。`vite@8.3.5` は WXT の必須 peer として直接 devDependency に追加。
 - **サプライチェーン**: pnpm は `minimumReleaseAge: 10080` / install スクリプト
   ブロック（`onlyBuiltDependencies`）/ `trustPolicy: no-downgrade` /
   `blockExoticSubdeps: true` を `pnpm-workspace.yaml` に設定。CI は
@@ -80,7 +84,7 @@ Actions 実行ページの Artifacts から取得できます。
   GA のワークフロー依存ロックファイル `.github/workflows/actions.lock`
   （`gh actions-lock`、GA 2026-10-28）に委ねます。最小権限（`contents: read`、
   artifact を上げるジョブのみ `actions: write`）、`actions/checkout` は
-  `persist-credentials: false`。`pull_request_target` は使用しません。
+  `persist-credentials: false`。`pull_request_target` は使用しません。CodeQL ジョブのみ `security-events: write`（と `packages: read`）を追加します。
 
 ### ワークフローのロックファイル（`actions.lock`）
 
@@ -95,12 +99,17 @@ gh actions-lock --verify-local  # オフラインで検証
 ```
 
 生成した `.github/workflows/actions.lock` はワークフローの変更と一緒にコミットします。
+`codeql.yml` や `dependency-review.yml` を変えたときも同様です。
+
+リポジトリ設定（Dependabot alerts、secret scanning / push protection、private
+vulnerability reporting、`main` のルールセット）は README のチェックリストと
+`SECURITY.md` を参照してください。
 
 ### 7 日ポリシー
 
 公開直後のサプライチェーン攻撃を避けるため、バージョン更新は 7 日待ちます。
 
-- pnpm: `minimumReleaseAge: 10080`（分）
+- pnpm: `minimumReleaseAge: 10080`（分）。`minimumReleaseAgeExclude` は使わない。7 日未満の最新安定版は、十分に古くなった安定版へピンする
 - Dependabot: `cooldown.default-days: 7`（**バージョン更新のみ**。セキュリティ
   更新は cooldown の対象外で、追加キーは不要）
 

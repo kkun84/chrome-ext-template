@@ -1,0 +1,27 @@
+# Dependency review for pull requests (available on public repositories).
+#
+# Uses a readable version tag; runtime pins come from
+# `.github/workflows/actions.lock` (`gh actions-lock`). After adding or
+# changing this file, regenerate the lockfile (see README / AGENTS.md).
+#
+# comment-summary-in-pr is omitted to avoid granting pull-requests: write.
+name: dependency-review
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  dependency-review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - name: Dependency review
+        uses: actions/dependency-review-action@v5.0.0
+        with:
+          fail-on-severity: moderate

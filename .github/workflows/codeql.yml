@@ -1,0 +1,55 @@
+# CodeQL analysis for this public template.
+#
+# Uses readable version tags; runtime pins come from
+# `.github/workflows/actions.lock` (`gh actions-lock`). After adding or
+# changing this file, regenerate the lockfile (see README / AGENTS.md).
+#
+# github/codeql-action@v4.39.1 is the newest stable release published at
+# least 7 days before 2026-11-10 JST (v4.39.2+ was too new).
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly, slightly off the hour to avoid load spikes.
+    - cron: "27 4 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    permissions:
+      # Job-level permissions replace workflow defaults.
+      contents: read
+      # Needed to upload SARIF / write code-scanning alerts.
+      security-events: write
+      # Fetch CodeQL query packs from GitHub Packages.
+      packages: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: javascript-typescript
+            build-mode: none
+          - language: actions
+            build-mode: none
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4.39.1
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v4.39.1
+        with:
+          category: "/language:${{ matrix.language }}"

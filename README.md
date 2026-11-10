@@ -4,13 +4,13 @@ WXT + Effect v4 + Nix による **Chrome MV3 拡張機能の雛形**です。
 Windows + WSL で開発し、Windows 側の Chrome に unpacked 拡張として読み込むワークフローを前提にしています。
 
 - **WXT 0.21.5** — ビルド / 開発サーバ / manifest 生成
-- **Effect 4.1.3** — ドメインロジック・依存注入（Functional Core / Imperative Shell）
+- **Effect 4.1.2** — ドメインロジック・依存注入（Functional Core / Imperative Shell）
 - **TypeScript 7.0.2** — Go ネイティブの `tsc`（型チェック専用。TS JS API は不要）
 - **Vitest 5** — `src/core` の純関数ユニットテスト（カバレッジは `@vitest/coverage-v8`）
 - **Playwright 1.59.1** — ビルド済み拡張の E2E（nixpkgs `playwright-driver` と一致させるため固定）
-- **Biome 2.6.6** — lint / format
+- **Biome 2.6.4** — lint / format
 - **Nix flake** — Node 24 / pnpm / Playwright Chromium を固定
-- **GitHub Actions CI** — lint / typecheck / test / build / e2e / nix / verify-lockfile
+- **GitHub Actions CI** — lint / typecheck / test / build / e2e / nix / verify-lockfile / CodeQL / dependency-review
 
 ---
 
@@ -138,7 +138,7 @@ Nix 外でローカル検証する場合のみ `CHROME_PATH=/usr/bin/google-chro
 
 - TS 7 は **型チェック専用** で、プログラム用 JS API を提供しません（JS API は 7.1 で予定、現在 beta のため未使用）。
 - WXT 0.21.5 は `typescript` を peer として要求しますが、その JS は `typescript` を `import` しません（`wxt prepare` は型/tsconfig を生成するだけ）。Vite 8 は Oxc/rolldown でトランスパイルするため TS API も不要です。
-- `vite@8.3.7` は WXT の必須 peer のため、直接 devDependency として追加しています（推移的にも解決済み）。
+- `vite@8.3.5` は WXT の必須 peer のため、直接 devDependency として追加しています（推移的にも解決済み）。
 - `tsconfig.json` は `baseUrl` を設定しません（WXT 生成の `.wxt/tsconfig.json` が `paths` を持ちます）。TS 7 は CSS の副作用 import に厳しいため、`types` に `vite/client` を追加しています。
 
 ---
@@ -155,7 +155,9 @@ Nix 外でローカル検証する場合のみ `CHROME_PATH=/usr/bin/google-chro
 | `build`              | `pnpm build` + `pnpm zip` → artifact `chrome-mv3-unpacked` / `chrome-mv3-zip` |
 | `e2e`                | `pnpm exec playwright install --with-deps chromium` → `pnpm test:e2e`。失敗時のみ `test-results/` と HTML レポートを artifact 化 |
 | `nix`                | `nix flake check` と `devShell` の realize（後述）                   |
-| `verify-lockfile`    | `.github/workflows/actions.lock` を `gh actions-lock --verify` で検証（`verify-lockfile.yml`） |
+| `verify-lockfile`    | `.github/workflows/actions.lock` を `gh actions-lock --verify` で検証（`verify-lockfile.yml`）。`ci.yml` / `codeql.yml` / `dependency-review.yml` / `verify-lockfile.yml` を対象にする |
+| `CodeQL`             | `codeql.yml`。`javascript-typescript` と `actions` を解析（`main` への push/PR、および毎週） |
+| `dependency-review`  | `dependency-review.yml`。`pull_request` で依存をレビューし、`fail-on-severity: moderate` |
 
 - artifact は各ジョブの **Actions 実行ページ → Artifacts** からダウンロードできます。
 - ローカルで同じ検証をするには:
@@ -170,7 +172,7 @@ Nix 外でローカル検証する場合のみ `CHROME_PATH=/usr/bin/google-chro
 
 - **Nix ジョブ** は `nixos-26.05` を実行時に解決します。このリポジトリは **`flake.lock` をコミットしていません**（作成時に Nix が無かったため）。Nix のあるマシンで `nix flake lock` を実行して `flake.lock` をコミットすると、CI が完全に再現可能になり推奨されます。
 - Playwright は **1.59.1 に固定** し、nixpkgs `playwright-driver` と一致させています（[Playwright のバージョン整合](#playwright-のバージョン整合) 参照）。
-- **CodeQL / dependency review はこのテンプレートに入れていません。** 個人 Free のプライベートリポジトリでは使えないためです。公開化、または GitHub Code Security の導入後に検討してください。
+- **CodeQL**（`codeql.yml`）と **dependency review**（`dependency-review.yml`）もこのテンプレートに含まれます。ワークフローを変えたら `gh actions-lock` で lockfile を更新し、`verify-lockfile` で検証してください。
 
 ### ワークフローのロックファイル（`actions.lock`）
 
@@ -213,25 +215,27 @@ lockfile は手編集しません。
 ## サプライチェーン / セキュリティ
 
 - **pnpm 設定**（`pnpm-workspace.yaml`）:
-  - `minimumReleaseAge: 10080`（7 日）— 公開直後のパッケージを拒否。テンプレート自身の pin（`effect` / `@biomejs/biome` / `vite` とその `@biomejs/cli-*`）はスナップショット時点で 7 日以内だったため `minimumReleaseAgeExclude` で除外（理由はファイル内にコメント）。
+  - `minimumReleaseAge: 10080`（7 日）— 公開から 7 日未満のパッケージはインストールしない。`minimumReleaseAgeExclude` は使わない。直接依存は、その時点で 7 日以上経過した最新の安定版にピンする（例: `effect@4.1.2`、`@biomejs/biome@2.6.4`、`vite@8.3.5`）。
   - `onlyBuiltDependencies: []` — install スクリプトは既定でブロック。現在のツリーにビルドが必要なパッケージはありません。
   - `trustPolicy: no-downgrade` / `blockExoticSubdeps: true`。
   - 常に `pnpm-lock.yaml` をコミットし、CI は `pnpm install --frozen-lockfile` を使用。
 - **GitHub Actions**:
   - `uses:` は**可読なバージョンタグ**（例: `actions/checkout@v7.0.1`）で書き、実行時の pin は GA のワークフロー依存ロックファイル `.github/workflows/actions.lock`（`gh actions-lock`）で管理。lockfile は手編集しない。
   - 権限は最小（`contents: read`、artifact を上げるジョブのみ `actions: write`）。`actions/checkout` は `persist-credentials: false`。
-  - `pull_request_target` は使用しません。CodeQL / dependency review は入れていません（個人 Free のプライベートリポジトリでは使えないため）。
+  - `pull_request_target` は使用しません。CodeQL ジョブだけ `security-events: write`（と packs 取得用の `packages: read`）を付与します。dependency review は `contents: read` のみです。
 
 ---
 
 ## リポジトリ設定チェックリスト
 
-以下はファイルでは設定できません。リポジトリの Settings から手動で行ってください。
+以下はファイルでは設定できません。リポジトリの Settings から手動で行ってください。脆弱性の報告方法は [`SECURITY.md`](./SECURITY.md) を参照してください。
 
 1. **Settings → Advanced Security**: Dependabot alerts、Dependabot security updates、Dependabot malware alerts をオンにする。
-2. **`.github/workflows/actions.lock` をコミットし、`verify-lockfile` ジョブが通ってから** Settings → Actions → Policies で **Require lockfile** を Active にする。lockfile が無い状態で Active にするとワークフローが止まります。Free プランに Evaluate モードはありません。
-3. 拡張を **GitHub Releases** で配るときに **immutable releases** をオンにする。
-4. **CodeQL / dependency review はこのテンプレートに入れていません**（個人 Free のプライベートリポジトリでは使えないため）。公開化、または GitHub Code Security 導入後に検討してください。
+2. **Secret scanning** と **push protection** をオンにする（公開リポジトリでは利用できます）。
+3. **Private vulnerability reporting** をオンにする（手順は [`SECURITY.md`](./SECURITY.md)）。
+4. **`.github/workflows/actions.lock` をコミットし、`verify-lockfile` ジョブが通ってから** Settings → Actions → Policies で **Require lockfile** を Active にする。lockfile が無い状態で Active にするとワークフローが止まります。Free プランに Evaluate モードはありません。
+5. **`main` のブランチルールセット**（Settings → Rules → Rulesets）: 直接 push を禁止し、PR を必須にする。必須ステータスに `lint` / `typecheck` / `test` / `build` / `e2e` / `nix` / `verify-lockfile` / CodeQL / dependency-review を含める。force push を禁止する。
+6. 拡張を **GitHub Releases** で配るときに **immutable releases** をオンにする。
 
 ---
 
