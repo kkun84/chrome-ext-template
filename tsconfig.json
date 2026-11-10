@@ -1,0 +1,18 @@
+{
+  "extends": "./.wxt/tsconfig.json",
+  "compilerOptions": {
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "verbatimModuleSyntax": true,
+    "types": ["node", "chrome"]
+  },
+  "include": [
+    "src",
+    "e2e",
+    "*.config.ts",
+    "vitest.config.ts",
+    "playwright.config.ts"
+  ]
+}
