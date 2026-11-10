@@ -44,7 +44,7 @@ pnpm install
 
 ### flake.lock について
 
-`flake.lock` はコミット済みです。`flake.nix` の入力 URL は `github:NixOS/nixpkgs/nixos-26.05` のまま、lock だけを 7 日以上経過した `nixos-26.05` の rev に固定しています（現在: `c9e06bd77aaeb410f5ed1fa491b58764a3d8c4b6`、committer date `2026-11-03T14:58:49Z`）。
+`flake.lock` はコミット済みです。`flake.nix` の入力 URL は `github:NixOS/nixpkgs/nixos-26.05` のまま、lock だけを 7 日以上経過した `nixos-26.05` の rev に固定しています（現在: `0273948573ae398423980aa6739366d0350d999a`、committer date `2026-11-03T08:41:17Z`）。
 
 rev を更新するときも URL は変えず、同じ方針で lock だけを差し替えます。
 
