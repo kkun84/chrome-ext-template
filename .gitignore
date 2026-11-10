@@ -17,6 +17,9 @@ playwright/.cache/
 # Vitest coverage
 coverage/
 
+# fallow cache
+.fallow/
+
 # Editor / OS
 .DS_Store
 *.log

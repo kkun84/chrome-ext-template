@@ -5,12 +5,10 @@ import { type SavedUrl, SavedUrlSchema } from "./url.js";
  * A single persisted entry. `savedAt` is epoch milliseconds so the value stays
  * trivially serializable through `chrome.storage`.
  */
-export class SavedUrlEntry extends Schema.Class<SavedUrlEntry>("SavedUrlEntry")(
-  {
-    url: SavedUrlSchema,
-    savedAt: Schema.Number,
-  },
-) {}
+class SavedUrlEntry extends Schema.Class<SavedUrlEntry>("SavedUrlEntry")({
+  url: SavedUrlSchema,
+  savedAt: Schema.Number,
+}) {}
 
 /** The persisted document shape, decoded at the `chrome.storage` boundary. */
 export class SavedUrlList extends Schema.Class<SavedUrlList>("SavedUrlList")({
@@ -18,9 +16,6 @@ export class SavedUrlList extends Schema.Class<SavedUrlList>("SavedUrlList")({
 }) {
   static readonly empty = new SavedUrlList({ entries: [] });
 }
-
-/** Runtime schema used to decode raw `chrome.storage.local` payloads. */
-export const SavedUrlListSchema = SavedUrlList;
 
 /**
  * Decode a raw storage payload into a {@link SavedUrlList}.

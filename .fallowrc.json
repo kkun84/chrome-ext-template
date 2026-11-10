@@ -1,0 +1,8 @@
+{
+  "$schema": "./node_modules/fallow/schema.json",
+  "ignorePatterns": [".output/**", ".wxt/**", "coverage/**"],
+  "rules": {
+    "unused-dev-dependencies": "error",
+    "circular-dependencies": "error"
+  }
+}

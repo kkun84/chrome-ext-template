@@ -17,11 +17,7 @@ export class ListSavedUrlsRequest extends Schema.TaggedClass<ListSavedUrlsReques
 ) {}
 
 /** Every request the popup can send to the background. */
-export const Request = Schema.Union([
-  SaveCurrentTabRequest,
-  ListSavedUrlsRequest,
-]);
-export type Request = typeof Request.Type;
+const Request = Schema.Union([SaveCurrentTabRequest, ListSavedUrlsRequest]);
 
 /** Response to {@link SaveCurrentTabRequest}. */
 export class SaveCurrentTabSuccess extends Schema.TaggedClass<SaveCurrentTabSuccess>()(
@@ -44,12 +40,11 @@ export class ListSavedUrlsSuccess extends Schema.TaggedClass<ListSavedUrlsSucces
  * Failure envelope. `reason` is a small closed set so the UI can exhaustively
  * match without inspecting error strings.
  */
-export const FailureReason = Schema.Literals([
+const FailureReason = Schema.Literals([
   "no-active-tab",
   "invalid-url",
   "unknown",
 ]);
-export type FailureReason = typeof FailureReason.Type;
 
 export class RequestFailed extends Schema.TaggedClass<RequestFailed>()(
   "RequestFailed",
