@@ -9,6 +9,11 @@
 #    are the newest stable versions that meet that gate.
 minimumReleaseAge: 10080
 
+# 1b. Fail installs when the local Node/pnpm does not satisfy `engines` in
+#     package.json. This keeps every contributor and CI runner on the pinned
+#     toolchain (Node 24 / pnpm 10.34.6).
+engineStrict: true
+
 # 2. Block install scripts by default; allow only packages that genuinely need
 #    a build step. The allowlist is intentionally empty. lefthook has a
 #    postinstall (`lefthook install`) that pnpm will report as ignored; leave

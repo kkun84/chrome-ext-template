@@ -1,11 +1,11 @@
 import { Effect, Layer } from "effect";
 import { defineBackground } from "wxt/utils/define-background";
+import { StorageLive } from "../layers/storage-live.js";
+import { TabsLive } from "../layers/tabs-live.js";
 import {
   decodeRequestEnvelope,
   type RequestEnvelope,
-} from "../core/messages.js";
-import { StorageLive } from "../layers/storage-live.js";
-import { TabsLive } from "../layers/tabs-live.js";
+} from "../services/messages.js";
 import { listSavedUrls, saveCurrentTabUrl } from "../services/use-cases.js";
 
 const LiveLayer = Layer.mergeAll(StorageLive, TabsLive);

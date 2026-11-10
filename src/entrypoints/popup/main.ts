@@ -1,11 +1,11 @@
 import { Effect, Layer, Match } from "effect";
+import { MessagingLive } from "../../layers/messaging-live.js";
 import {
   ListSavedUrlsRequest,
   RequestEnvelope,
   type Response,
   SaveCurrentTabRequest,
-} from "../../core/messages.js";
-import { MessagingLive } from "../../layers/messaging-live.js";
+} from "../../services/messages.js";
 import { Messaging } from "../../services/services.js";
 import "./style.css";
 

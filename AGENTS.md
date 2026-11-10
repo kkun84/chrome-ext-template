@@ -41,19 +41,65 @@ entrypoints  →  layers / services  →  core
 - **E2E** はビルド済み拡張を `--load-extension` で読み込み、Service Worker と
   ポップアップが到達可能であることを確認する（Playwright 1.59 の公式パターン）。
 
+## Definition of done
+
+- 作業を終える前に **`pnpm check`**（`lint` + `typecheck` + `test` + `fallow`）を
+  実行し、通ることを確認する。
+- リリース / CI 相当のフル検証では **`pnpm check:all`**（`check` + `test:coverage` +
+  `build` + `test:e2e` + `dedupe:check` + `audit`）も実行する。
+
+## Machine-enforced rules
+
+規約は文章だけでなく、次のツールで機械的に強制されます（すべて `error`）。
+
+- **Biome**（`biome.json`、`pnpm lint` = `biome ci .`）:
+  format / recommended lint、`noExplicitAny`（`any` 禁止）、`noImplicitAnyLet`、
+  `noConsole`、`noTsIgnore`、`noImportCycles`、`noNonNullAssertion`（`!` 禁止）、
+  `useImportType` / `useExportType`（型 import/export は `import type` / `export type`）、
+  `noReExportAll`（`export *` 禁止）、`noDefaultExport`（WXT entrypoints と config のみ
+  override で許可）、`noNamespace`、`noCommonJs`、`useNodejsImportProtocol`、
+  `noUnusedImports` / `noUnusedVariables`。レイヤー方向は `noRestrictedImports` /
+  `noRestrictedGlobals` で強制（core: chrome/WXT/layers/services/entrypoints 禁止、
+  services: layers/entrypoints 禁止、entrypoints: `src/core` 直接 import 禁止）。
+  assist の organizeImports も有効。
+- **fallow**（`.fallowrc.json`、`pnpm fallow`）: デッドコード / 循環依存 / 重複 /
+  ヘルスに加え、**architecture boundaries**（同じレイヤー方向。`entrypoints → layers /
+  services → core`）と、core ゾーンでの禁止呼び出し（`Date.now`、`Math.random`、
+  `chrome.*`、`browser.*`、`globalThis.chrome`）を検出する。
+- **TypeScript**（`tsconfig.json`）: `strict`、`noUncheckedIndexedAccess`、
+  `exactOptionalPropertyTypes`、`noImplicitOverride`、`noPropertyAccessFromIndexSignature`、
+  `noFallthroughCasesInSwitch`、`useUnknownInCatchVariables`、`verbatimModuleSyntax`、
+  `isolatedModules`、`noImplicitReturns`、`noUnusedLocals`、`noUnusedParameters`。
+- **Vitest**（`vitest.config.ts`）: `src/core/**` に lines / branches / functions /
+  statements 90% のカバレッジゲート（集計値。per-file ではない）。
+- **lefthook**（`lefthook.yml`）: pre-commit は staged ファイルに Biome、pre-push は
+  `pnpm check`。
+- **CI**（`.github/workflows/ci.yml`）: `pnpm lint`（`biome ci`）、fallow、typecheck、
+  tests + coverage、build、e2e、nix flake check + shellcheck/actionlint、
+  `pnpm dedupe --check`、`pnpm audit`。
+
 ## よく使うコマンド
 
 ```bash
-pnpm dev          # 開発（ブラウザ自動起動なし）
-pnpm build        # 本番ビルド
-pnpm typecheck    # wxt prepare + tsc
-pnpm lint         # Biome
-pnpm lint:fix     # Biome 自動修正
-pnpm test         # Vitest
+pnpm dev           # 開発（ブラウザ自動起動なし）
+pnpm build         # 本番ビルド
+pnpm zip           # 配布用 zip
+pnpm typecheck     # wxt prepare + tsc
+pnpm lint          # biome ci（format + lint + assist）
+pnpm lint:fix      # biome check --write
+pnpm fix           # biome check --write（lint:fix の別名）
+pnpm test          # Vitest
 pnpm test:coverage # Vitest + カバレッジ
-pnpm test:e2e     # ビルド + Playwright
-pnpm fallow       # fallow（デッドコード / 循環依存 / 重複 / ヘルス）
-pnpm fallow:audit # origin/main 基準の差分監査（新規のみ）
+pnpm test:e2e      # ビルド + Playwright
+pnpm fallow        # fallow（デッドコード / 循環依存 / 重複 / ヘルス / 境界）
+pnpm fallow:audit  # origin/main 基準の差分監査（新規のみ）
+pnpm check         # lint + typecheck + test + fallow
+pnpm check:all     # check + coverage + build + e2e + dedupe + audit
+pnpm clean         # 生成物（.output / .wxt / coverage 等）を削除
+pnpm dedupe:check  # pnpm dedupe --check
+pnpm audit         # pnpm audit（moderate 以上）
+pnpm settings:check # GitHub 設定のドリフト検出
+pnpm settings:apply # GitHub 設定を適用
 ```
 
 ## Git フック（lefthook）
@@ -61,13 +107,16 @@ pnpm fallow:audit # origin/main 基準の差分監査（新規のみ）
 - pre-commit / pre-push は `lefthook.yml` で定義し、`prepare`（`pnpm install` → `lefthook install`）で
   インストールします。フックをスキップするには `LEFTHOOK=0` を設定します。
 - `pre-commit` は staged の対象ファイルに `biome check --write`、`pre-push` は
-  `fallow audit --base origin/main --quiet` を実行します。
+  `pnpm check`（lint + typecheck + test + fallow）を実行します。
 - `fallow` は `3.38.1` に固定（7 日ポリシー）。`>=3.42.0` へは 2026-11-17 16:28 JST 以降に上げる。
 
 ## CI（GitHub Actions）
 
 `.github/workflows/ci.yml` が `push` / `pull_request` で `lint` / `fallow` /
-`typecheck` / `test`（カバレッジ）/ `build` / `e2e` / `nix` を実行します。artifact
+`typecheck` / `test`（カバレッジ）/ `build` / `e2e` / `nix` を実行します。`lint` ジョブは
+`pnpm lint`（`biome ci`）に加えて `pnpm dedupe:check` と `pnpm audit` を実行し、
+`nix` ジョブは `nix flake check` と devShell の realize の後に
+`shellcheck scripts/*.sh && actionlint` を実行します。artifact
 （カバレッジ・拡張の unpacked/zip・失敗時の Playwright trace/screenshot）は
 Actions 実行ページの Artifacts から取得できます。
 `.github/workflows/verify-lockfile.yml` が `actions.lock` の整合性を検証します

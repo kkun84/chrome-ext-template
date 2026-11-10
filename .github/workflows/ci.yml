@@ -14,11 +14,9 @@
 #   .github/workflows/dependency-review.yml  — dependency review on pull_request
 #   .github/workflows/verify-lockfile.yml    — gh actions-lock --verify
 #
-# Nix note: this repo intentionally does NOT commit a `flake.lock` (Nix was not
-# available when the template was written). The `nix` job therefore resolves
-# `nixos-26.05` from the flake input at run time. Once you commit a
-# `flake.lock`, the job becomes fully reproducible — that is the recommended
-# best practice.
+# Nix note: this repo commits a `flake.lock` pinned to a `nixos-26.05` rev that
+# is at least 7 days old. The `nix` job resolves nixpkgs from that lock, so the
+# job is fully reproducible.
 name: CI
 
 on:
@@ -55,6 +53,10 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Lint
         run: pnpm lint
+      - name: pnpm dedupe --check
+        run: pnpm dedupe:check
+      - name: pnpm audit
+        run: pnpm audit
 
   fallow:
     name: fallow
@@ -239,8 +241,10 @@ jobs:
         uses: DeterminateSystems/nix-installer-action@v23
       - name: Set up Nix cache
         uses: DeterminateSystems/magic-nix-cache-action@v15
-      # No `flake.lock` is committed on purpose; Nix resolves nixos-26.05 here.
+      # The committed `flake.lock` pins nixpkgs; Nix resolves it here.
       - name: nix flake check
         run: nix flake check --print-build-logs
       - name: Realize devShell
         run: nix build --no-link --print-out-paths .#devShells.x86_64-linux.default
+      - name: shellcheck and actionlint
+        run: nix develop --command sh -c 'shellcheck scripts/*.sh && actionlint'

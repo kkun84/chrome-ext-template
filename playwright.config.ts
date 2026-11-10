@@ -10,13 +10,23 @@ import { defineConfig } from "@playwright/test";
  * `PLAYWRIGHT_BROWSERS_PATH`. When running outside Nix, Playwright's own
  * Chromium download (or `CHROME_PATH`) is used.
  */
+
+/**
+ * Read an environment variable by name.
+ *
+ * `process.env[name]` (computed access) satisfies `noPropertyAccessFromIndexSignature`
+ * in TypeScript, while a local helper avoids Biome's `useLiteralKeys` info that
+ * would otherwise rewrite a bracketed string literal back to dot access.
+ */
+const readEnv = (name: string): string | undefined => process.env[name];
+
 export default defineConfig({
   testDir: "./e2e",
   fullyParallel: false,
-  forbidOnly: !!process.env.CI,
+  forbidOnly: Boolean(readEnv("CI")),
   retries: 0,
   workers: 1,
-  reporter: process.env.CI ? "list" : [["list"], ["html", { open: "never" }]],
+  reporter: readEnv("CI") ? "list" : [["list"], ["html", { open: "never" }]],
   use: {
     // Keep traces and screenshots only when a test fails so CI can upload them
     // without inflating artifacts on green runs.

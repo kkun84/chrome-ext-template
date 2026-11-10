@@ -15,8 +15,17 @@ export default defineConfig({
         "src/**/*.spec.ts",
         "src/entrypoints/**",
         "src/layers/**",
+        "src/services/messages.ts",
         "src/services/services.ts",
       ],
+      thresholds: {
+        "src/core/**": {
+          lines: 90,
+          branches: 90,
+          functions: 90,
+          statements: 90,
+        },
+      },
     },
   },
 });
