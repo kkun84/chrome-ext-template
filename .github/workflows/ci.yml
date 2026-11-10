@@ -56,6 +56,34 @@ jobs:
       - name: Lint
         run: pnpm lint
 
+  fallow:
+    name: fallow
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+          # fetch-depth: 0 is required so `fallow audit --base` can diff against
+          # the base branch on pull_request.
+          fetch-depth: 0
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6.1.0
+      - name: Set up Node
+        uses: actions/setup-node@v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: fallow
+        run: pnpm fallow
+      - name: fallow audit (pull_request only)
+        if: github.event_name == 'pull_request'
+        run: pnpm exec fallow audit --base origin/${{ github.base_ref }} --gate new-only --quiet
+
   typecheck:
     name: typecheck
     runs-on: ubuntu-latest

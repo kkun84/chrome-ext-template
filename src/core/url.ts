@@ -26,9 +26,6 @@ export const SavedUrlSchema = Schema.String.pipe(
 
 export type SavedUrl = typeof SavedUrlSchema.Type;
 
-/** Encode a branded {@link SavedUrl} back into a plain string. */
-export const encodeSavedUrl = Schema.encodeSync(SavedUrlSchema);
-
 /**
  * Decode an arbitrary `unknown` (e.g. a tab URL coming from `chrome.tabs`) into
  * a {@link SavedUrl}. Returns `undefined` when the input is not a usable URL.
@@ -47,19 +44,12 @@ export const decodeSavedUrl = (input: unknown): SavedUrl | undefined => {
 };
 
 /** The reasons a URL can be rejected before it is persisted. */
-export const UrlRejectionReason = Schema.Literals([
-  "empty",
-  "unsupported-protocol",
-]);
-export type UrlRejectionReason = typeof UrlRejectionReason.Type;
+const UrlRejectionReason = Schema.Literals(["empty", "unsupported-protocol"]);
 
-export class UrlRejected extends Schema.TaggedError<UrlRejected>()(
-  "UrlRejected",
-  {
-    input: Schema.String,
-    reason: UrlRejectionReason,
-  },
-) {}
+class UrlRejected extends Schema.TaggedError<UrlRejected>()("UrlRejected", {
+  input: Schema.String,
+  reason: UrlRejectionReason,
+}) {}
 
 /**
  * Normalize and validate a raw string as a persistable URL.

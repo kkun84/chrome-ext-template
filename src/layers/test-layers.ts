@@ -1,8 +1,7 @@
 import { Effect, Layer, Ref } from "effect";
-import type { Response } from "../core/messages.js";
 import type { SavedUrlList } from "../core/saved-urls.js";
 import { SavedUrlList as SavedUrlListClass } from "../core/saved-urls.js";
-import { Messaging, Storage, Tabs } from "../services/services.js";
+import { Storage, Tabs } from "../services/services.js";
 
 /**
  * In-memory {@link Storage} layer for tests. Holds the list in a `Ref` so tests
@@ -26,15 +25,4 @@ export const StorageTest = (
 export const TabsTest = (url: string | undefined): Layer.Layer<Tabs> =>
   Layer.succeed(Tabs, {
     getActiveTabUrl: () => Effect.succeed(url),
-  });
-
-/**
- * In-memory {@link Messaging} layer. `handler` maps a raw request to a decoded
- * response, mirroring what the background would do.
- */
-export const MessagingTest = (
-  handler: (request: unknown) => Response,
-): Layer.Layer<Messaging> =>
-  Layer.succeed(Messaging, {
-    send: (request) => Effect.succeed(handler(request)),
   });

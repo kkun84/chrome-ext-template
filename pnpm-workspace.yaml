@@ -10,10 +10,11 @@
 minimumReleaseAge: 10080
 
 # 2. Block install scripts by default; allow only packages that genuinely need
-#    a build step. Inspecting the current tree (`pnpm-lock.yaml`) shows no
-#    package with a `requiresBuild`/postinstall hook (Vite 8 builds with
-#    rolldown/oxc, not esbuild), so the allowlist is intentionally empty.
-#    Add a name here only if `pnpm install` reports an ignored build.
+#    a build step. The allowlist is intentionally empty. lefthook has a
+#    postinstall (`lefthook install`) that pnpm will report as ignored; leave
+#    it ignored — the binary comes from optionalDependencies, and hooks are
+#    installed by the package.json `prepare` script instead.
+#    Add a name here only if a package truly requires a compile step.
 onlyBuiltDependencies: []
 
 # 3. Refuse dependency downgrades (e.g. a malicious "newer" version that is

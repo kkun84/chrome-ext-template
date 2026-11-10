@@ -1,0 +1,15 @@
+pre-commit:
+  commands:
+    biome:
+      glob: "*.{js,jsx,ts,tsx,json,css}"
+      run: pnpm exec biome check --write {staged_files}
+      stage_fixed: true
+pre-push:
+  commands:
+    fallow-audit:
+      run: |
+        if git rev-parse --verify origin/main >/dev/null 2>&1; then
+          pnpm exec fallow audit --base origin/main --quiet
+        else
+          echo "Skipping fallow audit: origin/main is not available"
+        fi

@@ -1,8 +1,6 @@
 import type { Effect } from "effect";
 import { Context } from "effect";
-import type { RequestFailed } from "../core/messages.js";
 import type { SavedUrlList } from "../core/saved-urls.js";
-import type { SavedUrl } from "../core/url.js";
 
 /**
  * Persistence boundary for the saved URL list.
@@ -37,5 +35,3 @@ export class Messaging extends Context.Service<
     ) => Effect.Effect<import("../core/messages.js").Response>;
   }
 >()("chrome-ext-template/Messaging") {}
-
-export type { RequestFailed, SavedUrl };

@@ -52,12 +52,22 @@ pnpm lint:fix     # Biome 自動修正
 pnpm test         # Vitest
 pnpm test:coverage # Vitest + カバレッジ
 pnpm test:e2e     # ビルド + Playwright
+pnpm fallow       # fallow（デッドコード / 循環依存 / 重複 / ヘルス）
+pnpm fallow:audit # origin/main 基準の差分監査（新規のみ）
 ```
+
+## Git フック（lefthook）
+
+- pre-commit / pre-push は `lefthook.yml` で定義し、`prepare`（`pnpm install` → `lefthook install`）で
+  インストールします。フックをスキップするには `LEFTHOOK=0` を設定します。
+- `pre-commit` は staged の対象ファイルに `biome check --write`、`pre-push` は
+  `fallow audit --base origin/main --quiet` を実行します。
+- `fallow` は `3.38.1` に固定（7 日ポリシー）。`>=3.42.0` へは 2026-11-17 16:28 JST 以降に上げる。
 
 ## CI（GitHub Actions）
 
-`.github/workflows/ci.yml` が `push` / `pull_request` で `lint` / `typecheck` /
-`test`（カバレッジ）/ `build` / `e2e` / `nix` を実行します。artifact
+`.github/workflows/ci.yml` が `push` / `pull_request` で `lint` / `fallow` /
+`typecheck` / `test`（カバレッジ）/ `build` / `e2e` / `nix` を実行します。artifact
 （カバレッジ・拡張の unpacked/zip・失敗時の Playwright trace/screenshot）は
 Actions 実行ページの Artifacts から取得できます。
 `.github/workflows/verify-lockfile.yml` が `actions.lock` の整合性を検証します
@@ -103,7 +113,10 @@ gh actions-lock --verify-local  # オフラインで検証
 
 リポジトリ設定（Dependabot alerts、secret scanning / push protection、private
 vulnerability reporting、`main` のルールセット）は README のチェックリストと
-`SECURITY.md` を参照してください。
+`SECURITY.md` を参照してください。セキュリティ設定と `main` ルールセットは
+`scripts/github-settings.sh`（`--check` / `--apply`）と `.github/settings/*.json`
+でも管理します。ただし Actions の "Require lockfile" は API 非対応のため
+Settings UI で設定してください。
 
 ### 7 日ポリシー
 

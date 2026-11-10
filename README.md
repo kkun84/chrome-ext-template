@@ -9,8 +9,10 @@ Windows + WSL で開発し、Windows 側の Chrome に unpacked 拡張として�
 - **Vitest 5** — `src/core` の純関数ユニットテスト（カバレッジは `@vitest/coverage-v8`）
 - **Playwright 1.59.1** — ビルド済み拡張の E2E（nixpkgs `playwright-driver` と一致させるため固定）
 - **Biome 2.6.4** — lint / format
+- **fallow 3.38.1** — デッドコード / 循環依存 / 重複 / ヘルススコアの解析
+- **lefthook 2.2.1** — Git フック（pre-commit / pre-push）
 - **Nix flake** — Node 24 / pnpm / Playwright Chromium を固定
-- **GitHub Actions CI** — lint / typecheck / test / build / e2e / nix / verify-lockfile / CodeQL / dependency-review
+- **GitHub Actions CI** — lint / fallow / typecheck / test / build / e2e / nix / verify-lockfile / CodeQL / dependency-review
 
 ---
 
@@ -148,6 +150,7 @@ Nix 外でローカル検証する場合のみ `CHROME_PATH=/usr/bin/google-chro
 | ジョブ               | 内容                                                                 |
 | -------------------- | -------------------------------------------------------------------- |
 | `lint`               | `pnpm lint`（Biome）                                                 |
+| `fallow`             | `pnpm fallow`（デッドコード / 循環依存 / 重複 / ヘルス）。PR では `fallow audit --gate new-only` も実行 |
 | `typecheck`          | `pnpm typecheck`（`wxt prepare && tsc --noEmit`）                    |
 | `test`               | `pnpm test:coverage` → カバレッジ artifact `coverage`                |
 | `build`              | `pnpm build` + `pnpm zip` → artifact `chrome-mv3-unpacked` / `chrome-mv3-zip` |
@@ -162,7 +165,7 @@ Nix 外でローカル検証する場合のみ `CHROME_PATH=/usr/bin/google-chro
 
   ```bash
   pnpm install --frozen-lockfile
-  pnpm lint && pnpm typecheck && pnpm test:coverage
+  pnpm lint && pnpm fallow && pnpm typecheck && pnpm test:coverage
   pnpm build && pnpm zip
   pnpm exec playwright install --with-deps chromium   # 初回のみ
   pnpm test:e2e
@@ -210,11 +213,40 @@ lockfile は手編集しません。
 
 ---
 
+## fallow（デッドコード / 循環依存 / 重複 / ヘルス）
+
+[fallow](https://fallow.tools/) で未使用エクスポート、循環依存、重複、ヘルススコアを検査します。
+
+```bash
+pnpm fallow          # dead-code + architecture --cycles + dupes + health
+pnpm fallow:audit    # origin/main 基準の差分監査（新規の問題のみ）
+```
+
+- 設定は [`.fallowrc.json`](./.fallowrc.json)。`unused-dev-dependencies` と
+  `circular-dependencies` を `error` にしています。
+- `entry` は指定しません。WXT プラグインがエントリポイントを自動検出します。
+- `fallow` は **3.38.1 に固定**しています。7 日ポリシーにより、
+  `>=3.42.0`（`GHSA-rg8g-qqf6-7q69` と `GHSA-h858-c8f4-h92c`、いずれも Low を修正）へは
+  **2026-11-17 16:28 JST 以降**に上げてください。
+
+## lefthook（Git フック）
+
+[lefthook](https://lefthook.dev/) で pre-commit / pre-push フックを管理します。
+
+- フックは `prepare` スクリプト（`pnpm install` → `lefthook install`）でインストールされます。
+- フックをスキップするには `LEFTHOOK=0` を設定します（例: `LEFTHOOK=0 git commit ...`）。
+- `pre-commit` は staged の対象ファイルに `biome check --write` を実行し、修正を stage します。
+- `pre-push` は `fallow audit --base origin/main --quiet` を実行します（`origin/main` が無い場合はスキップ）。
+- 設定は [`lefthook.yml`](./lefthook.yml)。
+- `lefthook` は `2.2.1` に固定しています。npm provenance を持ち、かつ 7 日ポリシーを満たす後続リリースが出るまでは `2.2.1` のままにします（その条件を満たした時点で上げます）。
+
+---
+
 ## サプライチェーン / セキュリティ
 
 - **pnpm 設定**（`pnpm-workspace.yaml`）:
   - `minimumReleaseAge: 10080`（7 日）— 公開から 7 日未満のパッケージはインストールしない。`minimumReleaseAgeExclude` は使わない。直接依存は、その時点で 7 日以上経過した最新の安定版にピンする（例: `effect@4.1.2`、`@biomejs/biome@2.6.4`、`vite@8.3.5`）。
-  - `onlyBuiltDependencies: []` — install スクリプトは既定でブロック。現在のツリーにビルドが必要なパッケージはありません。
+  - `onlyBuiltDependencies: []` — install スクリプトは既定でブロック。lefthook の postinstall は無視して問題ありません（バイナリは optionalDependencies から入り、フックは `prepare` で入れます）。
   - `trustPolicy: no-downgrade` / `blockExoticSubdeps: true`。
   - 常に `pnpm-lock.yaml` をコミットし、CI は `pnpm install --frozen-lockfile` を使用。
 - **GitHub Actions**:
@@ -228,12 +260,33 @@ lockfile は手編集しません。
 
 以下はファイルでは設定できません。リポジトリの Settings から手動で行ってください。脆弱性の報告方法は [`SECURITY.md`](./SECURITY.md) を参照してください。
 
+一部の設定は `scripts/github-settings.sh` でコード化しています（後述）。
+
 1. **Settings → Advanced Security**: Dependabot alerts、Dependabot security updates、Dependabot malware alerts をオンにする。
 2. **Secret scanning** と **push protection** をオンにする（公開リポジトリでは利用できます）。
 3. **Private vulnerability reporting** をオンにする（手順は [`SECURITY.md`](./SECURITY.md)）。
 4. **`.github/workflows/actions.lock` をコミットし、`verify-lockfile` ジョブが通ってから** Settings → Actions → Policies で **Require lockfile** を Active にする。lockfile が無い状態で Active にするとワークフローが止まります。Free プランに Evaluate モードはありません。
-5. **`main` のブランチルールセット**（Settings → Rules → Rulesets）: 直接 push を禁止し、PR を必須にする。必須ステータスに `lint` / `typecheck` / `test` / `build` / `e2e` / `nix` / `verify-lockfile` / CodeQL / dependency-review を含める。force push を禁止する。
+5. **`main` のブランチルールセット**（Settings → Rules → Rulesets）: 直接 push を禁止し、PR を必須にする。必須ステータスに `lint` / `fallow` / `typecheck` / `test` / `build` / `e2e` / `nix` / `verify-lockfile` / CodeQL / dependency-review を含める。force push を禁止する。
 6. 拡張を **GitHub Releases** で配るときに **immutable releases** をオンにする。
+
+---
+
+## リポジトリ設定のコード化（`scripts/github-settings.sh`）
+
+セキュリティ設定と `main` のルールセットを JSON として管理します。
+
+```bash
+./scripts/github-settings.sh --check   # 読み取り専用でドリフトを検出（既定）
+./scripts/github-settings.sh --apply   # 望ましい状態を書き込む
+```
+
+- リポジトリは `--repo OWNER/REPO` か第 1 引数、省略時は `gh repo view` から取得します。
+- 望ましい状態は [`.github/settings/security.json`](./.github/settings/security.json) と
+  [`.github/settings/ruleset-main.json`](./.github/settings/ruleset-main.json)。
+- `--check` は書き込みません。ドリフトがあると非 0 で終了します。
+- **Actions の "Require lockfile" は API では設定できません**（[github/rest-api-description#7366](https://github.com/github/rest-api-description/issues/7366)）。
+  Settings → Actions → Policies の UI から手動で設定してください。スクリプトはこの項目を扱いません。
+- 依存には `gh` と `jq` が必要です。
 
 ---
 
@@ -251,6 +304,8 @@ lockfile は手編集しません。
 | `pnpm test:coverage` | Vitest + カバレッジ（text/lcov/html → `coverage/`） |
 | `pnpm test:watch` | Vitest ウォッチ                    |
 | `pnpm test:e2e`   | ビルド + Playwright E2E            |
+| `pnpm fallow`     | fallow でデッドコード / 循環依存 / 重複 / ヘルスを解析 |
+| `pnpm fallow:audit` | `origin/main` を基準にした fallow 監査（新規のみ） |
 
 ---
 
