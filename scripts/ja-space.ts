@@ -319,29 +319,53 @@ const findBacktickRun = (
   length: number,
 ): number => {
   let i = from;
-  let blankRun = 0;
+  // The line holding the opener is never blank (it contains the backtick).
+  let lineBlank = false;
   while (i < chars.length) {
     const ch = chars[i];
-    if (ch === " " || ch === "\t") {
-      blankRun += 1;
-      if (blankRun >= 2) {
+    if (ch === "\n") {
+      if (lineBlank) {
         return -1;
       }
+      lineBlank = true;
       i += 1;
       continue;
     }
-    blankRun = 0;
     if (ch === "`" && active[i]) {
-      const run = backtickRunLength(chars, i);
-      if (run === length) {
+      const { next, matched } = consumeBacktickRun(chars, i, length);
+      if (matched) {
         return i;
       }
-      i += run;
+      lineBlank = false;
+      i = next;
       continue;
+    }
+    if (!isBlankLineChar(ch)) {
+      lineBlank = false;
     }
     i += 1;
   }
   return -1;
+};
+
+/** True for characters that leave a line blank. */
+const isBlankLineChar = (ch: string | undefined): boolean =>
+  ch === " " || ch === "\t" || ch === "\r";
+
+/**
+ * Consume a backtick run at `i`, reporting whether it is exactly `length`
+ * backticks long and where scanning resumes when it does not match.
+ */
+const consumeBacktickRun = (
+  chars: readonly string[],
+  i: number,
+  length: number,
+): { readonly next: number; readonly matched: boolean } => {
+  const run = backtickRunLength(chars, i);
+  if (run === length) {
+    return { next: i, matched: true };
+  }
+  return { next: i + run, matched: false };
 };
 
 const backtickRunLength = (chars: readonly string[], from: number): number => {
@@ -352,7 +376,7 @@ const backtickRunLength = (chars: readonly string[], from: number): number => {
   return run;
 };
 
-const URL_PATTERN = /\b(?:https?|ftp|mailto):[^\s<>"'`)\]]+/g;
+const URL_PATTERN = /\b(?:https?|ftp|mailto):[^\s<>"'`)\]]+/gi;
 
 /** Mask URL tokens in every mode. */
 const maskUrls = (chars: string[], active: boolean[]): void => {
@@ -499,6 +523,9 @@ const maskStringLiteral = (
   from: number,
   quote: string,
 ): number => {
+  if (quote === "`") {
+    return maskTemplateLiteral(chars, active, from);
+  }
   let i = from + 1;
   active[from] = true;
   while (i < chars.length) {
@@ -513,6 +540,72 @@ const maskStringLiteral = (
       return i + 1;
     }
     i += 1;
+  }
+  return i;
+};
+
+/**
+ * Mask a template literal: string-text parts are checked, while `${...}`
+ * interpolations stay inactive (their comments and nested literals are still
+ * checked). A `\${` is literal text, not an interpolation.
+ */
+const maskTemplateLiteral = (
+  chars: string[],
+  active: boolean[],
+  from: number,
+): number => {
+  let i = from + 1;
+  active[from] = true;
+  while (i < chars.length) {
+    const ch = chars[i];
+    if (ch === "\\") {
+      active[i] = true;
+      active[i + 1] = true;
+      i += 2;
+      continue;
+    }
+    if (ch === "`") {
+      active[i] = true;
+      return i + 1;
+    }
+    if (ch === "$" && chars[i + 1] === "{") {
+      active[i] = false;
+      active[i + 1] = false;
+      i = maskTemplateInterpolation(chars, active, i + 2);
+      continue;
+    }
+    active[i] = true;
+    i += 1;
+  }
+  return i;
+};
+
+/** Mask one `${...}` body, returning the index after the matching `}`. */
+const maskTemplateInterpolation = (
+  chars: string[],
+  active: boolean[],
+  from: number,
+): number => {
+  let i = from;
+  let depth = 1;
+  while (i < chars.length) {
+    const ch = chars[i];
+    if (ch === "{") {
+      depth += 1;
+      i += 1;
+      continue;
+    }
+    if (ch === "}") {
+      depth -= 1;
+      i += 1;
+      if (depth === 0) {
+        return i;
+      }
+      continue;
+    }
+    // Comments and nested string/template literals are masked by the shared
+    // TypeScript token dispatcher; anything else is skipped one character.
+    i = maskCodeToken(chars, active, i);
   }
   return i;
 };
@@ -597,6 +690,9 @@ const skipQuotedLiteral = (
   from: number,
   quote: string,
 ): number => {
+  if (quote === "`") {
+    return skipTemplateLiteral(chars, from);
+  }
   let i = from + 1;
   while (i < chars.length) {
     if (chars[i] === "\\") {
@@ -605,6 +701,57 @@ const skipQuotedLiteral = (
     }
     if (chars[i] === quote) {
       return i + 1;
+    }
+    i += 1;
+  }
+  return i;
+};
+
+/** Skip a template literal, including nested templates in interpolations. */
+const skipTemplateLiteral = (
+  chars: readonly string[],
+  from: number,
+): number => {
+  let i = from + 1;
+  while (i < chars.length) {
+    const ch = chars[i];
+    if (ch === "\\") {
+      i += 2;
+      continue;
+    }
+    if (ch === "`") {
+      return i + 1;
+    }
+    if (ch === "$" && chars[i + 1] === "{") {
+      i = skipTemplateInterpolation(chars, i + 2);
+      continue;
+    }
+    i += 1;
+  }
+  return i;
+};
+
+/** Skip a `${...}` body, returning the index after the matching `}`. */
+const skipTemplateInterpolation = (
+  chars: readonly string[],
+  from: number,
+): number => {
+  let i = from;
+  let depth = 1;
+  while (i < chars.length) {
+    const skip = skipTsToken(chars, i);
+    if (skip > i) {
+      i = skip;
+      continue;
+    }
+    const ch = chars[i];
+    if (ch === "{") {
+      depth += 1;
+    } else if (ch === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        return i + 1;
+      }
     }
     i += 1;
   }
@@ -793,7 +940,7 @@ const readJsxClosingTag = (
   return close + 1;
 };
 
-/** Index of the first space/tab at or after `from`. */
+/** Index of the first non-space/non-tab at or after `from` (or the end). */
 const skipSpaces = (chars: readonly string[], from: number): number => {
   let i = from;
   while (chars[i] === " " || chars[i] === "\t") {
@@ -906,19 +1053,41 @@ const findHashComment = (
       quote = ch;
       continue;
     }
-    if (startsHashComment(chars, i, line.start)) {
+    if (startsHashComment(chars, i, line.start, backslash)) {
       return i;
     }
   }
   return -1;
 };
 
-/** True when a `#` at `i` opens a comment (line start or after a space). */
+/**
+ * True when a `#` at `i` opens a comment (line start or after a space). In
+ * shell mode a `#` after an escaped space is literal, not a comment.
+ */
 const startsHashComment = (
   chars: readonly string[],
   i: number,
   lineStart: number,
-): boolean => chars[i] === "#" && (i === lineStart || chars[i - 1] === " ");
+  backslash: boolean,
+): boolean => {
+  if (chars[i] !== "#") {
+    return false;
+  }
+  if (i === lineStart) {
+    return true;
+  }
+  if (chars[i - 1] !== " ") {
+    return false;
+  }
+  if (!backslash) {
+    return true;
+  }
+  let escapes = 0;
+  for (let j = i - 2; j >= lineStart && chars[j] === "\\"; j -= 1) {
+    escapes += 1;
+  }
+  return escapes % 2 === 0;
+};
 
 /** Mask everything except HTML text nodes and quoted attribute values. */
 const maskHtml = (chars: string[], active: boolean[]): void => {

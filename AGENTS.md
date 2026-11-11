@@ -91,7 +91,7 @@ entrypoints  →  layers / services  →  core
   Markdownの説明は対象外）。`pnpm lint` / `pnpm check`の一部として実行される。
 - **fallow**（`.fallowrc.json`、`pnpm fallow`）: デッドコード / 循環依存 / 重複 /
   ヘルスに加え、**architecture boundaries**（同じレイヤー方向。`entrypoints → layers /
-  services → core`）と、core ゾーンでの禁止呼び出し（`Date.now`、`Math.random`、
+  services → core`）と、coreゾーンでの禁止呼び出し（`Date.now`、`Math.random`、
   `chrome.*`、`browser.*`、`globalThis.chrome`）を検出する。`fallow audit`の
   `added-suppression`は`error`（新規の抑制コメントを拒否）。
 - **TypeScript**（`tsconfig.json`）: `strict`、`noUncheckedIndexedAccess`、
