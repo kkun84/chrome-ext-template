@@ -150,7 +150,7 @@ Nix外でローカル検証する場合のみ`CHROME_PATH=/usr/bin/google-chrome
 
 | ジョブ               | 内容                                                                 |
 | -------------------- | -------------------------------------------------------------------- |
-| `lint`               | `pnpm lint`（`biome ci` + `rumdl check` + ja-space）。続けて`pnpm dedupe:check`と`pnpm audit`を実行 |
+| `lint`               | `pnpm lint`（`biome ci` + `rumdl check` + ja-space + pnpm-policy + no-suppress）。続けて`pnpm dedupe:check`と`pnpm audit`を実行 |
 | `fallow`             | `pnpm fallow`（デッドコード / 循環依存 / 重複 / ヘルス / 境界）。PRでは`fallow audit --gate new-only`も実行 |
 | `typecheck`          | `pnpm typecheck`（`wxt prepare && tsc --noEmit`）                    |
 | `test`               | `pnpm test:coverage` → カバレッジartifact `coverage`                |
@@ -246,7 +246,7 @@ pnpm fallow:audit    # origin/main 基準の差分監査（新規の問題のみ
 
 - フックは`prepare`スクリプト（`pnpm install` → `lefthook install`）でインストールされます。
 - フックをスキップするには`LEFTHOOK=0`を設定します（例: `LEFTHOOK=0 git commit ...`）。
-- `pre-commit`はstagedの対象ファイルに`biome check --write`（`*.{js,jsx,ts,tsx,json,css}`）と`rumdl check`（`*.md`）、日本語タイポグラフィの`--fix`（`*.{md,ts,tsx,js,yml,yaml,sh,html}`）を実行し、修正をstageします。
+- `pre-commit`はstagedの対象ファイルに`biome check --write`（`**/*.{js,jsx,ts,tsx,json,css}`）と`rumdl check`（`**/*.md`）、日本語タイポグラフィの`--fix`（`**/*.{md,ts,tsx,js,yml,yaml,sh,html}`）を実行し、修正をstageします。globは再帰形なのでサブディレクトリのファイルも対象です。
 - `pre-push`は`pnpm check`（lint + typecheck + test + fallow）を実行します。
 - 設定は [`lefthook.yml`](./lefthook.yml)。
 - `lefthook`は`2.2.1`に固定しています。npm provenanceを持ち、かつ7日ポリシーを満たす後続リリースが出るまでは`2.2.1`のままにします（その条件を満たした時点で上げます）。
@@ -280,7 +280,7 @@ Markdownは[rumdl](https://github.com/rvben/rumdl) 0.3.2で検査します（`pn
 ## サプライチェーン / セキュリティ
 
 - **pnpm設定**（`pnpm-workspace.yaml`）:
-  - `minimumReleaseAge: 10080`（7日）— 公開から7日未満のパッケージはインストールしない。`minimumReleaseAgeExclude`は使わない。直接依存は、その時点で7日以上経過した最新の安定版にピンする（例: `effect@4.1.2`、`@biomejs/biome@2.6.4`、`vite@8.3.5`）。
+  - `minimumReleaseAge: 10080`（7日）— 公開から7日未満のパッケージはインストールしない。`minimumReleaseAgeExclude`やtrust-policyの除外は使わず、`pnpm lint:pnpm-policy`でも拒否する。直接依存は、その時点で7日以上経過した最新の安定版にピンする（例: `effect@4.1.2`、`@biomejs/biome@2.6.4`、`vite@8.3.5`）。
   - `onlyBuiltDependencies: []` — installスクリプトは既定でブロック。lefthookのpostinstallは無視して問題ありません（バイナリはoptionalDependenciesから入り、フックは`prepare`で入れます）。
   - `trustPolicy: no-downgrade` / `blockExoticSubdeps: true`。
   - 常に`pnpm-lock.yaml`をコミットし、CIは`pnpm install --frozen-lockfile`を使用。
@@ -333,9 +333,11 @@ Markdownは[rumdl](https://github.com/rvben/rumdl) 0.3.2で検査します（`pn
 | `pnpm build`      | 本番ビルド（`.output/chrome-mv3`） |
 | `pnpm zip`        | 配布用zipを作成                  |
 | `pnpm typecheck`  | `wxt prepare` + `tsc --noEmit`     |
-| `pnpm lint`       | `biome ci` + `rumdl check .` + `lint:ja-space`（format + lint + assist + Markdown + 日本語タイポグラフィ）|
+| `pnpm lint`       | `biome ci` + `rumdl check .` + `lint:ja-space` + `lint:pnpm-policy` + `lint:no-suppress`（format + lint + assist + Markdown + 日本語タイポグラフィ + 供給網ポリシー + 抑制コメント）|
 | `pnpm lint:md`    | `rumdl check .`（Markdownのlint）|
 | `pnpm lint:ja-space` | 日本語と英数字の間の半角スペースを検査 |
+| `pnpm lint:pnpm-policy` | pnpmの供給網ポリシー（除外キー / 必須設定 / 禁止CLIオプション）を検査 |
+| `pnpm lint:no-suppress` | 抑制コメント（`biome-ignore` / `@ts-*` / `eslint-disable` / `fallow-ignore`）を検査 |
 | `pnpm lint:fix`   | Biome + rumdl + 日本語タイポグラフィを自動修正 |
 | `pnpm fix`        | `lint:fix`の別名 |
 | `pnpm test`       | Vitestユニットテスト              |

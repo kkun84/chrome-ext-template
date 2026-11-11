@@ -4,7 +4,8 @@
   "rules": {
     "unused-dev-dependencies": "error",
     "circular-dependencies": "error",
-    "boundary-violation": "error"
+    "boundary-violation": "error",
+    "added-suppression": "error"
   },
   "boundaries": {
     "zones": [
