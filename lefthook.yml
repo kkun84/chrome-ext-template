@@ -1,14 +1,14 @@
 pre-commit:
   commands:
     biome:
-      glob: "*.{js,jsx,ts,tsx,json,css}"
+      glob: "**/*.{js,jsx,ts,tsx,json,css}"
       run: pnpm exec biome check --write {staged_files}
       stage_fixed: true
     rumdl:
-      glob: "*.md"
+      glob: "**/*.md"
       run: pnpm exec rumdl check {staged_files}
     ja-space:
-      glob: "*.{md,ts,tsx,js,yml,yaml,sh,html}"
+      glob: "**/*.{md,ts,tsx,js,yml,yaml,sh,html}"
       run: >-
         node --experimental-strip-types --disable-warning=ExperimentalWarning
         scripts/lint-ja-space.ts --fix {staged_files}

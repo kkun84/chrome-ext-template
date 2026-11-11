@@ -186,7 +186,9 @@ jobs:
 
   e2e:
     name: e2e (Playwright)
-    runs-on: ubuntu-latest
+    # Playwright 1.59.1 (pinned to nixpkgs `playwright-driver`) does not
+    # support Ubuntu 26.04, which `ubuntu-latest` now provides.
+    runs-on: ubuntu-24.04
     permissions:
       # Job-level permissions replace the workflow defaults, so keep
       # contents: read (checkout) and add actions: write (artifacts).

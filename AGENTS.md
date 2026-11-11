@@ -79,18 +79,30 @@ entrypoints  →  layers / services  →  core
 - **ja-space**（`scripts/lint-ja-space.ts`、`pnpm lint:ja-space`）: 上記の日本語タイポグラフィを
   機械的に強制する。`src`と`scripts`のTypeScriptはVitest（`scripts/ja-space.test.ts`等）で検証する。
   `pnpm lint` / `pnpm check`の一部として実行される。
+- **pnpm-policy**（`scripts/lint-pnpm-policy.ts`、`pnpm lint:pnpm-policy`）:
+  `pnpm-workspace.yaml` / `package.json`の`"pnpm"` / `.npmrc`で除外・無視キー
+  （`minimumReleaseAgeExclude`等）を禁止し、必須設定（`minimumReleaseAge >= 10080`、
+  `trustPolicy: no-downgrade`、`onlyBuiltDependencies: []`、`blockExoticSubdeps: true`）が
+  欠落・緩和されていないか検証する。スクリプト / ワークフロー / `lefthook.yml`の禁止CLI
+  オプションも検出する。`pnpm lint` / `pnpm check`の一部として実行される。
+- **no-suppress**（`scripts/lint-no-suppress.ts`、`pnpm lint:no-suppress`）:
+  `biome-ignore` / `@ts-expect-error` / `@ts-ignore` / `@ts-nocheck` /
+  `eslint-disable` / `fallow-ignore`を**コメント**として書くことを禁止する（文字列や
+  Markdownの説明は対象外）。`pnpm lint` / `pnpm check`の一部として実行される。
 - **fallow**（`.fallowrc.json`、`pnpm fallow`）: デッドコード / 循環依存 / 重複 /
   ヘルスに加え、**architecture boundaries**（同じレイヤー方向。`entrypoints → layers /
   services → core`）と、core ゾーンでの禁止呼び出し（`Date.now`、`Math.random`、
-  `chrome.*`、`browser.*`、`globalThis.chrome`）を検出する。
+  `chrome.*`、`browser.*`、`globalThis.chrome`）を検出する。`fallow audit`の
+  `added-suppression`は`error`（新規の抑制コメントを拒否）。
 - **TypeScript**（`tsconfig.json`）: `strict`、`noUncheckedIndexedAccess`、
   `exactOptionalPropertyTypes`、`noImplicitOverride`、`noPropertyAccessFromIndexSignature`、
   `noFallthroughCasesInSwitch`、`useUnknownInCatchVariables`、`verbatimModuleSyntax`、
   `isolatedModules`、`noImplicitReturns`、`noUnusedLocals`、`noUnusedParameters`。
 - **Vitest**（`vitest.config.ts`）: `src/core/**`にlines / branches / functions /
   statements 90% のカバレッジゲート（集計値。per-fileではない）。
-- **lefthook**（`lefthook.yml`）: pre-commitはstagedファイルにBiome / rumdl（`*.md`） /
-  日本語タイポグラフィの`--fix`、pre-pushは`pnpm check`。
+- **lefthook**（`lefthook.yml`）: pre-commitはstagedファイルにBiome / rumdl（`**/*.md`） /
+  日本語タイポグラフィの`--fix`、pre-pushは`pnpm check`。globは再帰形（`**/*.{...}`）で
+  サブディレクトリのファイルも対象にする。
 - **CI**（`.github/workflows/ci.yml`）: `pnpm lint`（`biome ci`）、fallow、typecheck、
   tests + coverage、build、e2e、nix flake check + shellcheck/actionlint、
   `pnpm dedupe --check`、`pnpm audit`。
@@ -102,9 +114,11 @@ pnpm dev           # 開発（ブラウザ自動起動なし）
 pnpm build         # 本番ビルド
 pnpm zip           # 配布用 zip
 pnpm typecheck     # wxt prepare + tsc
-pnpm lint          # biome ci + rumdl check + ja-space check
+pnpm lint          # biome ci + rumdl check + ja-space + pnpm-policy + no-suppress
 pnpm lint:md       # rumdl check .
 pnpm lint:ja-space # 日本語と英語の間の空白を検査
+pnpm lint:pnpm-policy # pnpmの供給網ポリシーを検査
+pnpm lint:no-suppress # 抑制コメントを検査
 pnpm lint:fix      # biome check --write + rumdl check --fix + ja-space --fix
 pnpm fix           # lint:fixの別名
 pnpm test          # Vitest
@@ -191,7 +205,9 @@ Settings UIで設定してください。
 
 公開直後のサプライチェーン攻撃を避けるため、バージョン更新は7日待ちます。
 
-- pnpm: `minimumReleaseAge: 10080`（分）。`minimumReleaseAgeExclude`は使わない。7日未満の最新安定版は、十分に古くなった安定版へピンする
+- pnpm: `minimumReleaseAge: 10080`（分）。`minimumReleaseAgeExclude`やtrust-policyの除外は
+  文章で禁止するだけでなく`pnpm lint:pnpm-policy`が拒否する。7日未満の最新安定版は、
+  十分に古くなった安定版へピンする
 - Dependabot: `cooldown.default-days: 7`（**バージョン更新のみ**。セキュリティ
   更新はcooldownの対象外で、追加キーは不要）
 
