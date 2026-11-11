@@ -35,6 +35,15 @@ describe("detectJaSpace", () => {
     expect(detectJaSpace("日本語URL", { mode: "plain" })).toHaveLength(0);
   });
 
+  it("ignores uppercase and mixed-case URL schemes", () => {
+    const upper = "HTTPS://example.test/日本語\u0020URL";
+    const mixed = "HttpS://example.test/日本語\u0020URL";
+    expect(detectJaSpace(upper, { mode: "plain" })).toHaveLength(0);
+    expect(detectJaSpace(mixed, { mode: "plain" })).toHaveLength(0);
+    expect(fixJaSpace(upper, { mode: "plain" }).fixed).toBe(upper);
+    expect(fixJaSpace(mixed, { mode: "plain" }).fixed).toBe(mixed);
+  });
+
   it("reports 1-based line and column", () => {
     const [violation] = detectJaSpace(`line\n日本語${SP}URL`, {
       mode: "plain",
@@ -65,10 +74,52 @@ describe("markdown masking", () => {
     ).toHaveLength(0);
   });
 
+  it("does not abort an inline code span on consecutive spaces", () => {
+    const input = "`日本語\u0020URL\u0020\u0020`";
+    expect(detectJaSpace(input, { mode: "markdown" })).toHaveLength(0);
+    expect(fixJaSpace(input, { mode: "markdown" }).fixed).toBe(input);
+  });
+
+  it("aborts an inline code span at a blank line", () => {
+    const input = "`日本語\u0020URL\n\nx`";
+    expect(detectJaSpace(input, { mode: "markdown" })).toHaveLength(1);
+  });
+
+  it("aborts an inline code span at a whitespace-only line", () => {
+    const input = "`日本語\u0020URL\n   \nx`";
+    expect(detectJaSpace(input, { mode: "markdown" })).toHaveLength(1);
+  });
+
+  it("keeps an inline code span open across a non-blank line", () => {
+    const input = "`日本語\u0020URL\nmore`";
+    expect(detectJaSpace(input, { mode: "markdown" })).toHaveLength(0);
+    expect(fixJaSpace(input, { mode: "markdown" }).fixed).toBe(input);
+  });
+
+  it("skips a backtick run of a different length", () => {
+    const input = "`日本語\u0020URL``";
+    expect(detectJaSpace(input, { mode: "markdown" })).toHaveLength(1);
+  });
+
+  it("preserves consecutive spaces inside a code span", () => {
+    const input = "`日本語\u0020\u0020URL`";
+    expect(detectJaSpace(input, { mode: "markdown" })).toHaveLength(0);
+    expect(fixJaSpace(input, { mode: "markdown" }).fixed).toBe(input);
+  });
+
   it("leaves URLs untouched", () => {
     expect(
       detectJaSpace("https://example.com/日本語 URL", { mode: "markdown" }),
     ).toHaveLength(0);
+  });
+
+  it("ignores uppercase and mixed-case URL schemes", () => {
+    const upper = "HTTPS://example.test/日本語\u0020URL";
+    const mixed = "HttpS://example.test/日本語\u0020URL";
+    expect(detectJaSpace(upper, { mode: "markdown" })).toHaveLength(0);
+    expect(detectJaSpace(mixed, { mode: "markdown" })).toHaveLength(0);
+    expect(fixJaSpace(upper, { mode: "markdown" }).fixed).toBe(upper);
+    expect(fixJaSpace(mixed, { mode: "markdown" }).fixed).toBe(mixed);
   });
 
   it("allows a space after a link destination", () => {
@@ -128,6 +179,62 @@ describe("typescript masking", () => {
     ).toHaveLength(1);
   });
 
+  it("does not flag template interpolation expressions", () => {
+    const input = "`値は ${value as\u0020日} です`";
+    expect(detectJaSpace(input, { mode: "typescript" })).toHaveLength(0);
+    expect(fixJaSpace(input, { mode: "typescript" }).fixed).toBe(input);
+  });
+
+  it("flags template string text", () => {
+    const input = "`日本語\u0020URL`";
+    expect(detectJaSpace(input, { mode: "typescript" })).toHaveLength(1);
+    expect(fixJaSpace(input, { mode: "typescript" }).fixed).toBe("`日本語URL`");
+  });
+
+  it("checks string literals inside an interpolation", () => {
+    const input = "`x ${'日本語\u0020URL'}`";
+    expect(detectJaSpace(input, { mode: "typescript" })).toHaveLength(1);
+    expect(fixJaSpace(input, { mode: "typescript" }).fixed).toBe(
+      "`x ${'日本語URL'}`",
+    );
+  });
+
+  it("checks comments inside an interpolation", () => {
+    const input = "`x ${/* 日本語\u0020URL */ 1}`";
+    expect(detectJaSpace(input, { mode: "typescript" })).toHaveLength(1);
+    expect(fixJaSpace(input, { mode: "typescript" }).fixed).toBe(
+      "`x ${/* 日本語URL */ 1}`",
+    );
+  });
+
+  it("treats an escaped dollar-brace as literal text", () => {
+    const input = "`\\${日本語\u0020URL}`";
+    expect(detectJaSpace(input, { mode: "typescript" })).toHaveLength(1);
+  });
+
+  it("handles nested templates", () => {
+    const clean = "`外 ${`内 ${value as\u0020日}`}`";
+    expect(detectJaSpace(clean, { mode: "typescript" })).toHaveLength(0);
+    const dirty = "`外 ${`内 ${value as\u0020日} 日本語\u0020URL`}`";
+    expect(detectJaSpace(dirty, { mode: "typescript" })).toHaveLength(1);
+    expect(fixJaSpace(dirty, { mode: "typescript" }).fixed).toBe(
+      "`外 ${`内 ${value as\u0020日} 日本語URL`}`",
+    );
+  });
+
+  it("handles nested braces inside an interpolation", () => {
+    const input = "`x ${ { a: 1 } } 日本語\u0020URL`";
+    expect(detectJaSpace(input, { mode: "typescript" })).toHaveLength(1);
+    expect(fixJaSpace(input, { mode: "typescript" }).fixed).toBe(
+      "`x ${ { a: 1 } } 日本語URL`",
+    );
+  });
+
+  it("handles an unmatched interpolation end", () => {
+    const input = "`${value as\u0020日";
+    expect(detectJaSpace(input, { mode: "typescript" })).toHaveLength(0);
+  });
+
   it("ignores identifiers", () => {
     expect(
       detectJaSpace("const\u0020日本語 = 1;", { mode: "typescript" }),
@@ -157,6 +264,14 @@ describe("tsx masking", () => {
     ).toHaveLength(1);
   });
 
+  it("handles template literals like typescript", () => {
+    const clean = "const x = `値は ${value as\u0020日} です`;";
+    expect(detectJaSpace(clean, { mode: "tsx" })).toHaveLength(0);
+    expect(fixJaSpace(clean, { mode: "tsx" }).fixed).toBe(clean);
+    const dirty = "const x = `日本語\u0020URL`;";
+    expect(detectJaSpace(dirty, { mode: "tsx" })).toHaveLength(1);
+  });
+
   it("checks JSX text inside a nested expression", () => {
     expect(
       detectJaSpace("<div>{ok ? <span>日本語\u0020URL</span> : null}</div>", {
@@ -184,6 +299,36 @@ describe("tsx masking", () => {
     expect(
       detectJaSpace("<p>日本語\u0020URL</p>", { mode: "typescript" }),
     ).toHaveLength(0);
+  });
+});
+
+describe("shell masking", () => {
+  it("checks hash comments", () => {
+    expect(
+      detectJaSpace("echo foo\u0020#\u0020日本語\u0020URL", { mode: "shell" }),
+    ).toHaveLength(1);
+  });
+
+  it("does not treat an escaped space before # as a comment", () => {
+    const input = "echo foo\\\u0020#\u0020日本語\u0020URL";
+    expect(detectJaSpace(input, { mode: "shell" })).toHaveLength(0);
+    expect(fixJaSpace(input, { mode: "shell" }).fixed).toBe(input);
+  });
+
+  it("still checks a comment after an even backslash run", () => {
+    const input = `echo foo \\\\${SP}#${SP}日本語${SP}URL`;
+    expect(detectJaSpace(input, { mode: "shell" })).toHaveLength(1);
+    expect(fixJaSpace(input, { mode: "shell" }).fixed).toBe(
+      `echo foo \\\\${SP}#${SP}日本語URL`,
+    );
+  });
+});
+
+describe("yaml masking", () => {
+  it("checks hash comments", () => {
+    expect(
+      detectJaSpace("#\u0020日本語\u0020URL", { mode: "yaml" }),
+    ).toHaveLength(1);
   });
 });
 
