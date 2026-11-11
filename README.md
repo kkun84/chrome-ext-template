@@ -146,7 +146,7 @@ Nix外でローカル検証する場合のみ`CHROME_PATH=/usr/bin/google-chrome
 
 ## CI（GitHub Actions）
 
-`.github/workflows/ci.yml`が`push` / `pull_request`で以下を実行します（すべて`ubuntu-latest` / Node 24）。
+`.github/workflows/ci.yml`が`push` / `pull_request`で以下を実行します（`e2e`のみ`ubuntu-24.04`、他は`ubuntu-latest` / Node 24）。`e2e`を`ubuntu-24.04`に固定するのは、Playwright 1.59.1がUbuntu 26.04をサポートしないためです。
 
 | ジョブ               | 内容                                                                 |
 | -------------------- | -------------------------------------------------------------------- |
