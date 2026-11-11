@@ -20,6 +20,9 @@ coverage/
 # fallow cache
 .fallow/
 
+# rumdl cache
+.rumdl_cache/
+
 # Editor / OS
 .DS_Store
 *.log

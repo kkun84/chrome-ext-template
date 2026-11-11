@@ -1,0 +1,22 @@
+# rumdl configuration (https://github.com/rvben/rumdl).
+#
+# `flavor = "standard"` already includes GFM. We keep the default rule set and
+# disable only the rules that are wrong for this repo:
+#
+# - MD013 (line length): disabled. The docs are Japanese prose, where line
+#   length is a rendering concern (CJK wraps without spaces) and reflowing
+#   would fight the "no space between Japanese and ASCII" typography rule.
+#   See AGENTS.md.
+#
+# MD033 (inline HTML) stays enabled: the repo has no inline HTML in Markdown;
+# placeholders like `<this-repo>` live inside fenced code blocks and are not
+# affected.
+
+[global]
+flavor = "standard"
+respect_gitignore = true
+exclude = ["node_modules", ".output", ".wxt", "coverage"]
+
+[MD013]
+# Japanese prose: line length is the renderer's job, not the linter's.
+enabled = false

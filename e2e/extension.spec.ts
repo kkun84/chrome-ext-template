@@ -64,10 +64,10 @@ test.describe("unpacked extension smoke", () => {
 
     const popup = await openPopup(context);
     await expect(
-      popup.getByRole("heading", { name: "保存した URL" }),
+      popup.getByRole("heading", { name: "保存したURL" }),
     ).toBeVisible();
     await expect(
-      popup.getByRole("button", { name: "現在のタブの URL を保存" }),
+      popup.getByRole("button", { name: "現在のタブのURLを保存" }),
     ).toBeVisible();
   });
 
@@ -82,9 +82,7 @@ test.describe("unpacked extension smoke", () => {
     let popup = await openPopup(context);
     const savedUrl = "https://example.com/";
 
-    await popup
-      .getByRole("button", { name: "現在のタブの URL を保存" })
-      .click();
+    await popup.getByRole("button", { name: "現在のタブのURLを保存" }).click();
     await expect(
       popup.locator("#urls li", { hasText: savedUrl }),
     ).toBeVisible();

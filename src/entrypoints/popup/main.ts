@@ -30,7 +30,7 @@ const render = (
         urls: [],
       }),
       ListSavedUrlsSuccess: (r) => ({
-        status: r.urls.length === 0 ? "まだ保存された URL はありません" : "",
+        status: r.urls.length === 0 ? "まだ保存されたURLはありません" : "",
         urls: r.urls,
       }),
       RequestFailed: (r) => ({
