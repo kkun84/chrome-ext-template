@@ -10,6 +10,8 @@
  *                  code spans and URLs. The backticks of an inline code span
  *                  count as ASCII so `の `code`` is flagged.
  * - `typescript` — check only `//` and block comments plus string literals.
+ * - `tsx`        — like `typescript`, plus JSX text children. JSX expressions
+ *                  (`{...}`) and attributes keep the TypeScript handling.
  * - `yaml`       — check only `#` comments.
  * - `shell`      — check only `#` comments.
  * - `html`       — check only text nodes and quoted attribute values.
@@ -18,7 +20,7 @@
 
 /** Japanese class from the typography rule. */
 const JP_CLASS =
-  "\\u3041-\\u3093\\u30A1-\\u30F6\\u4E00-\\u9FFF\\u3000-\\u303F\\uFF01-\\uFF5E";
+  "\\u3041-\\u3093\\u30A1-\\u30F6\\u30FC\\u4E00-\\u9FFF\\u3000-\\u303F\\uFF01-\\uFF5E";
 
 const JP_CHAR = new RegExp(`^[${JP_CLASS}]$`);
 
@@ -34,6 +36,7 @@ const ASCII_BACKTICK = "x";
 export type MaskMode =
   | "markdown"
   | "typescript"
+  | "tsx"
   | "yaml"
   | "shell"
   | "html"
@@ -116,30 +119,9 @@ const buildView = (input: string, mode: MaskMode): string[] => {
   const active = chars.map(() => true);
   const view = [...chars];
 
-  if (mode === "markdown") {
-    maskFrontMatter(chars, active);
-    maskFencedCode(chars, active);
-    maskIndentedCode(chars, active);
-    maskInlineCode(chars, active, view);
-  } else if (mode === "typescript") {
-    maskCodeCommentsAndStrings(chars, active);
-  } else if (mode === "yaml") {
-    maskYamlComments(chars, active);
-  } else if (mode === "shell") {
-    maskShellComments(chars, active);
-  } else if (mode === "html") {
-    maskHtml(chars, active);
-  }
-
+  applyModeMask(chars, active, view, mode);
   maskUrls(chars, active);
-
-  if (mode === "markdown") {
-    maskLinkTailSpace(chars, active);
-    maskIssueReferenceSpace(chars, active);
-    maskOrderedListMarkerSpace(chars, active);
-  } else {
-    maskIssueReferenceSpace(chars, active);
-  }
+  applyModeAllowances(chars, active, mode);
 
   for (let i = 0; i < chars.length; i += 1) {
     if (!active[i]) {
@@ -147,6 +129,47 @@ const buildView = (input: string, mode: MaskMode): string[] => {
     }
   }
   return view;
+};
+
+/** Apply the masking strategy for `mode`. */
+const applyModeMask = (
+  chars: string[],
+  active: boolean[],
+  view: string[],
+  mode: MaskMode,
+): void => {
+  if (mode === "markdown") {
+    maskFrontMatter(chars, active);
+    maskFencedCode(chars, active);
+    maskIndentedCode(chars, active);
+    maskInlineCode(chars, active, view);
+  } else if (mode === "typescript") {
+    maskCodeCommentsAndStrings(chars, active);
+  } else if (mode === "tsx") {
+    maskCodeCommentsAndStrings(chars, active);
+    maskJsxText(chars, active);
+  } else if (mode === "yaml") {
+    maskYamlComments(chars, active);
+  } else if (mode === "shell") {
+    maskShellComments(chars, active);
+  } else if (mode === "html") {
+    maskHtml(chars, active);
+  }
+};
+
+/** Apply the per-mode allowances (links, issue refs, list markers). */
+const applyModeAllowances = (
+  chars: string[],
+  active: boolean[],
+  mode: MaskMode,
+): void => {
+  if (mode === "markdown") {
+    maskLinkTailSpace(chars, active);
+    maskIssueReferenceSpace(chars, active);
+    maskOrderedListMarkerSpace(chars, active);
+    return;
+  }
+  maskIssueReferenceSpace(chars, active);
 };
 
 /** Find the end (exclusive) of the line containing `from`. */
@@ -507,6 +530,334 @@ const markThrough = (
   return Math.min(from + count, limit);
 };
 
+/**
+ * Mark JSX text children as active on top of the TypeScript masking. Comments
+ * and string literals are already handled; expressions (`{...}`) and tag
+ * attributes stay inactive except for the string literals they contain.
+ */
+const maskJsxText = (chars: string[], active: boolean[]): void => {
+  const ranges: Range[] = [];
+  let i = 0;
+  while (i < chars.length) {
+    const skip = skipTsToken(chars, i);
+    if (skip > i) {
+      i = skip;
+      continue;
+    }
+    if (chars[i] === "<") {
+      const end = parseJsxElement(chars, ranges, i);
+      if (end !== null) {
+        i = end;
+        continue;
+      }
+    }
+    i += 1;
+  }
+  for (const [start, stop] of ranges) {
+    for (let k = start; k < stop; k += 1) {
+      active[k] = true;
+    }
+  }
+};
+
+/** Skip a TypeScript comment or string/template literal starting at `from`. */
+const skipTsToken = (chars: readonly string[], from: number): number => {
+  const ch = chars[from];
+  const next = chars[from + 1];
+  if (ch === "/" && next === "/") {
+    return skipLineComment(chars, from);
+  }
+  if (ch === "/" && next === "*") {
+    return skipBlockComment(chars, from);
+  }
+  if (ch === '"' || ch === "'" || ch === "`") {
+    return skipQuotedLiteral(chars, from, ch);
+  }
+  return from;
+};
+
+const skipLineComment = (chars: readonly string[], from: number): number => {
+  let i = from + 2;
+  while (i < chars.length && chars[i] !== "\n") {
+    i += 1;
+  }
+  return i;
+};
+
+const skipBlockComment = (chars: readonly string[], from: number): number => {
+  let i = from + 2;
+  while (i < chars.length && !(chars[i] === "*" && chars[i + 1] === "/")) {
+    i += 1;
+  }
+  return Math.min(i + 2, chars.length);
+};
+
+const skipQuotedLiteral = (
+  chars: readonly string[],
+  from: number,
+  quote: string,
+): number => {
+  let i = from + 1;
+  while (i < chars.length) {
+    if (chars[i] === "\\") {
+      i += 2;
+      continue;
+    }
+    if (chars[i] === quote) {
+      return i + 1;
+    }
+    i += 1;
+  }
+  return i;
+};
+
+const isJsxNameStart = (ch: string | undefined): boolean =>
+  ch !== undefined && /^[A-Za-z_$]$/.test(ch);
+
+const isJsxNameChar = (ch: string | undefined): boolean =>
+  ch !== undefined && /^[A-Za-z0-9_$.:-]$/.test(ch);
+
+/** Read a JSX tag name at `from`, or `null` when none starts there. */
+const readJsxTagName = (
+  chars: readonly string[],
+  from: number,
+): { name: string; end: number } | null => {
+  if (!isJsxNameStart(chars[from])) {
+    return null;
+  }
+  let i = from + 1;
+  while (isJsxNameChar(chars[i])) {
+    i += 1;
+  }
+  return { name: chars.slice(from, i).join(""), end: i };
+};
+
+/**
+ * Try to parse a JSX element starting at `<`. On success, append the text-node
+ * ranges to `out` and return the index after the element; otherwise return
+ * `null` without touching `out` (so generics and comparisons roll back).
+ */
+const parseJsxElement = (
+  chars: readonly string[],
+  out: Range[],
+  from: number,
+): number | null => {
+  const local: Range[] = [];
+  const end = parseJsxElementInto(chars, local, from);
+  if (end === null) {
+    return null;
+  }
+  out.push(...local);
+  return end;
+};
+
+const parseJsxElementInto = (
+  chars: readonly string[],
+  ranges: Range[],
+  from: number,
+): number | null => {
+  let i = from + 1;
+  if (chars[i] === ">") {
+    return parseJsxChildren(chars, ranges, i + 1, null);
+  }
+  if (chars[i] === "/") {
+    return null;
+  }
+  const tag = readJsxTagName(chars, i);
+  if (tag === null) {
+    return null;
+  }
+  i = tag.end;
+  const tagEnd = findJsxTagEnd(chars, i);
+  if (tagEnd === null) {
+    return null;
+  }
+  if (tagEnd.selfClosing) {
+    return tagEnd.end;
+  }
+  return parseJsxChildren(chars, ranges, tagEnd.end, tag.name);
+};
+
+/** Find the `>` or `/>` closing a JSX tag, ignoring nested `{...}`. */
+const findJsxTagEnd = (
+  chars: readonly string[],
+  from: number,
+): { end: number; selfClosing: boolean } | null => {
+  let i = from;
+  while (i < chars.length) {
+    const skip = skipTsToken(chars, i);
+    if (skip > i) {
+      i = skip;
+      continue;
+    }
+    const ch = chars[i];
+    if (ch === "{") {
+      i = skipBalancedBraces(chars, i);
+      continue;
+    }
+    if (ch === ">") {
+      return { end: i + 1, selfClosing: false };
+    }
+    if (ch === "/" && chars[i + 1] === ">") {
+      return { end: i + 2, selfClosing: true };
+    }
+    i += 1;
+  }
+  return null;
+};
+
+/** Skip a balanced `{...}` run starting at `{`; returns the index after `}`. */
+const skipBalancedBraces = (chars: readonly string[], from: number): number => {
+  let i = from;
+  let depth = 0;
+  while (i < chars.length) {
+    const skip = skipTsToken(chars, i);
+    if (skip > i) {
+      i = skip;
+      continue;
+    }
+    const ch = chars[i];
+    if (ch === "{") {
+      depth += 1;
+    } else if (ch === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        return i + 1;
+      }
+    }
+    i += 1;
+  }
+  return i;
+};
+
+/** Collect JSX text-node ranges until the element's closing tag. */
+const parseJsxChildren = (
+  chars: readonly string[],
+  ranges: Range[],
+  from: number,
+  name: string | null,
+): number | null => {
+  let i = from;
+  let textStart = from;
+  const flush = (end: number): void => {
+    if (end > textStart) {
+      ranges.push([textStart, end]);
+    }
+  };
+  while (i < chars.length) {
+    const ch = chars[i];
+    if (ch === "<") {
+      if (chars[i + 1] === "/") {
+        flush(i);
+        return readJsxClosingTag(chars, i, name);
+      }
+      const end = parseJsxElement(chars, ranges, i);
+      if (end !== null) {
+        flush(i);
+        i = end;
+        textStart = i;
+        continue;
+      }
+      i += 1;
+      continue;
+    }
+    if (ch === "{") {
+      flush(i);
+      i = scanJsxExpression(chars, ranges, i + 1);
+      textStart = i;
+      continue;
+    }
+    i += 1;
+  }
+  return null;
+};
+
+/** Parse `</name>` (or `</>` for fragments); `null` when it does not match. */
+const readJsxClosingTag = (
+  chars: readonly string[],
+  from: number,
+  expected: string | null,
+): number | null => {
+  const nameStart = skipSpaces(chars, from + 2);
+  if (chars[nameStart] === ">") {
+    return expected === null ? nameStart + 1 : null;
+  }
+  const tag = readJsxTagName(chars, nameStart);
+  if (tag === null) {
+    return null;
+  }
+  const close = indexOfChar(chars, tag.end, ">");
+  if (close >= chars.length || (expected !== null && tag.name !== expected)) {
+    return null;
+  }
+  return close + 1;
+};
+
+/** Index of the first space/tab at or after `from`. */
+const skipSpaces = (chars: readonly string[], from: number): number => {
+  let i = from;
+  while (chars[i] === " " || chars[i] === "\t") {
+    i += 1;
+  }
+  return i;
+};
+
+/** Index of `target` at or after `from`, or `chars.length` when absent. */
+const indexOfChar = (
+  chars: readonly string[],
+  from: number,
+  target: string,
+): number => {
+  let i = from;
+  while (i < chars.length && chars[i] !== target) {
+    i += 1;
+  }
+  return i;
+};
+
+/** Scan a JSX `{...}` expression; nested JSX text nodes are still collected. */
+const scanJsxExpression = (
+  chars: readonly string[],
+  ranges: Range[],
+  from: number,
+): number => {
+  let i = from;
+  let depth = 1;
+  while (i < chars.length) {
+    const skip = skipTsToken(chars, i);
+    if (skip > i) {
+      i = skip;
+      continue;
+    }
+    const ch = chars[i];
+    if (ch === "{") {
+      depth += 1;
+      i += 1;
+      continue;
+    }
+    if (ch === "}") {
+      depth -= 1;
+      i += 1;
+      if (depth === 0) {
+        return i;
+      }
+      continue;
+    }
+    if (ch === "<") {
+      const end = parseJsxElement(chars, ranges, i);
+      if (end !== null) {
+        i = end;
+        continue;
+      }
+    }
+    i += 1;
+  }
+  return i;
+};
+
+/** A half-open `[start, end)` character range. */
+type Range = readonly [start: number, end: number];
+
 /** Mask everything except YAML `#` comments. */
 const maskYamlComments = (chars: string[], active: boolean[]): void => {
   maskHashComments(chars, active, false);
@@ -585,7 +936,8 @@ const maskHtmlFrom = (
   from: number,
 ): number => {
   if (chars.slice(from, from + 4).join("") === "<!--") {
-    const stop = htmlRunEnd(chars, chars.indexOf(">", from + 4));
+    const close = findHtmlCommentEnd(chars, from + 4);
+    const stop = close < 0 ? chars.length : close + 3;
     deactivate(active, from, stop);
     return stop;
   }
@@ -597,6 +949,16 @@ const maskHtmlFrom = (
     return maskRawText(chars, active, name, stop);
   }
   return stop;
+};
+
+/** Index of the `-->` closing an HTML comment, or -1 when unclosed. */
+const findHtmlCommentEnd = (chars: readonly string[], from: number): number => {
+  for (let i = from; i + 2 < chars.length; i += 1) {
+    if (chars[i] === "-" && chars[i + 1] === "-" && chars[i + 2] === ">") {
+      return i;
+    }
+  }
+  return -1;
 };
 
 /** End index (exclusive) for a run that should stop just after `closeAt`. */
@@ -714,9 +1076,10 @@ export const modeForExtension = (extension: string): MaskMode | null => {
     case ".md":
       return "markdown";
     case ".ts":
-    case ".tsx":
     case ".js":
       return "typescript";
+    case ".tsx":
+      return "tsx";
     case ".yml":
     case ".yaml":
       return "yaml";

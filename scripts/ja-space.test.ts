@@ -26,6 +26,11 @@ describe("detectJaSpace", () => {
     expect(violations).toHaveLength(1);
   });
 
+  it("flags the prolonged sound mark before ASCII", () => {
+    const [violation] = detectJaSpace(`サーバー${SP}URL`, { mode: "plain" });
+    expect(violation?.direction).toBe("jp-to-ascii");
+  });
+
   it("does not flag text without a forbidden space", () => {
     expect(detectJaSpace("日本語URL", { mode: "plain" })).toHaveLength(0);
   });
@@ -130,6 +135,58 @@ describe("typescript masking", () => {
   });
 });
 
+describe("tsx masking", () => {
+  it("checks JSX text children", () => {
+    expect(
+      detectJaSpace("<p>日本語\u0020URL</p>", { mode: "tsx" }),
+    ).toHaveLength(1);
+  });
+
+  it("fixes JSX text children", () => {
+    expect(fixJaSpace("<p>日本語\u0020URL</p>", { mode: "tsx" }).fixed).toBe(
+      "<p>日本語URL</p>",
+    );
+  });
+
+  it("still checks comments and string literals", () => {
+    expect(detectJaSpace("// 日本語\u0020URL", { mode: "tsx" })).toHaveLength(
+      1,
+    );
+    expect(
+      detectJaSpace('const s = "日本語\u0020URL";', { mode: "tsx" }),
+    ).toHaveLength(1);
+  });
+
+  it("checks JSX text inside a nested expression", () => {
+    expect(
+      detectJaSpace("<div>{ok ? <span>日本語\u0020URL</span> : null}</div>", {
+        mode: "tsx",
+      }),
+    ).toHaveLength(1);
+  });
+
+  it("does not flag identifiers in JSX expressions or generics", () => {
+    expect(
+      detectJaSpace("const x = <p>{value}</p>;", { mode: "tsx" }),
+    ).toHaveLength(0);
+    expect(
+      detectJaSpace("const [s] = useState<string>();", { mode: "tsx" }),
+    ).toHaveLength(0);
+  });
+
+  it("keeps string-literal attribute handling", () => {
+    expect(
+      detectJaSpace('<p title="日本語\u0020URL">x</p>', { mode: "tsx" }),
+    ).toHaveLength(1);
+  });
+
+  it("does not scan JSX text in typescript mode", () => {
+    expect(
+      detectJaSpace("<p>日本語\u0020URL</p>", { mode: "typescript" }),
+    ).toHaveLength(0);
+  });
+});
+
 describe("html masking", () => {
   it("checks text nodes", () => {
     expect(
@@ -142,12 +199,31 @@ describe("html masking", () => {
       detectJaSpace('<a title="日本語\u0020URL">x</a>', { mode: "html" }),
     ).toHaveLength(1);
   });
+
+  it("does not flag text inside a comment containing an inner `>`", () => {
+    expect(
+      detectJaSpace("<!-- x > 日本語\u0020URL -->", { mode: "html" }),
+    ).toHaveLength(0);
+  });
+
+  it("leaves a comment unchanged but fixes text outside it", () => {
+    const input = `<!-- x > 日本語${SP}URL --><p>日本語${SP}URL</p>`;
+    expect(fixJaSpace(input, { mode: "html" }).fixed).toBe(
+      `<!-- x > 日本語${SP}URL --><p>日本語URL</p>`,
+    );
+  });
 });
 
 describe("fixJaSpace", () => {
   it("removes only the violating space", () => {
     expect(fixJaSpace(`日本語${SP}URL`, { mode: "plain" }).fixed).toBe(
       "日本語URL",
+    );
+  });
+
+  it("removes a space after the prolonged sound mark", () => {
+    expect(fixJaSpace(`サーバー${SP}URL`, { mode: "plain" }).fixed).toBe(
+      "サーバーURL",
     );
   });
 
@@ -171,6 +247,7 @@ describe("modeForExtension", () => {
   it("maps known extensions and rejects unknown ones", () => {
     expect(modeForExtension(".md")).toBe("markdown");
     expect(modeForExtension(".ts")).toBe("typescript");
+    expect(modeForExtension(".tsx")).toBe("tsx");
     expect(modeForExtension(".html")).toBe("html");
     expect(modeForExtension(".txt")).toBeNull();
   });
