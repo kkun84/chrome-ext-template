@@ -1,7 +1,11 @@
 # CI for the Chrome MV3 extension template.
 #
-# Triggers on every push and pull request. Jobs are intentionally separate so a
-# failure points at a single concern.
+# Triggers on every push and pull request, and once a week. Jobs are
+# intentionally separate so a failure points at a single concern.
+#
+# `pnpm audit` runs only on the weekly schedule: it inspects every installed
+# dependency, so a new advisory would otherwise fail unrelated pull requests.
+# Dependencies a pull request adds are checked by dependency-review.yml.
 #
 # Action pins: `uses:` uses readable version tags (e.g. actions/checkout@v7.0.1).
 # Runtime pins come from the GA workflow dependency lockfile
@@ -22,6 +26,9 @@ name: CI
 on:
   push:
   pull_request:
+  schedule:
+    # Mondays 05:13 UTC.
+    - cron: "13 5 * * 1"
 
 # Cancel superseded runs on the same ref.
 concurrency:
@@ -55,6 +62,25 @@ jobs:
         run: pnpm lint
       - name: pnpm dedupe --check
         run: pnpm dedupe:check
+
+  audit:
+    name: audit (weekly)
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6.1.0
+      - name: Set up Node
+        uses: actions/setup-node@v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
       - name: pnpm audit
         run: pnpm audit
 
@@ -141,6 +167,31 @@ jobs:
           name: coverage
           path: coverage/
           if-no-files-found: error
+
+  mutation:
+    name: mutation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6.1.0
+      - name: Set up Node
+        uses: actions/setup-node@v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      # Vitest needs .wxt/tsconfig.json (see the test job).
+      - name: Prepare WXT
+        run: pnpm exec wxt prepare
+      # Every mutant, not only the diff: this also catches a change that only
+      # weakens or removes tests.
+      - name: Mutation tests
+        run: pnpm mutation
 
   build:
     name: build

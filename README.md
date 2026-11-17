@@ -8,10 +8,10 @@ Windows + WSLで開発し、Windows側のChromeにunpacked拡張として読み�
 - **TypeScript 7.0.2** — Goネイティブの`tsc`（型チェック専用。TS JS APIは不要）
 - **Vitest 5** — `src/core`の純関数ユニットテスト（カバレッジは`@vitest/coverage-v8`）
 - **Playwright 1.59.1** — ビルド済み拡張のE2E（nixpkgs `playwright-driver`と一致させるため固定）
-- **mutator 0.2.0** — ミューテーションテスト（`pnpm mutation`。`pnpm check`は差分だけ実行）
+- **mutator 0.2.0** — ミューテーションテスト（CIは全件、`pnpm check`は差分だけ実行）
 - **Biome 2.6.4** — lint / format（`pnpm lint` = `biome ci`、assistでimport整理）
 - **rumdl 0.3.2** — Markdownのlint（`pnpm lint:md`、日本語ドキュメントのため`MD013`のみ無効）
-- **fallow 3.38.1** — デッドコード / 循環依存 / 重複 / ヘルススコア / アーキテクチャ境界の解析
+- **fallow 3.42.0** — デッドコード / 循環依存 / 重複 / ヘルススコア / アーキテクチャ境界の解析
 - **lefthook 2.2.1** — Gitフック（pre-commit / pre-push）
 - **Nix flake** — Node 24 / pnpm / Playwright Chromium / shellcheck / actionlintを固定
 - **GitHub Actions CI** — lint / fallow / typecheck / test / build / e2e / nix / verify-lockfile / CodeQL / dependency-review
@@ -151,7 +151,9 @@ Nix外でローカル検証する場合のみ`CHROME_PATH=/usr/bin/google-chrome
 
 | ジョブ               | 内容                                                                 |
 | -------------------- | -------------------------------------------------------------------- |
-| `lint`               | `pnpm lint`（`biome ci` + `rumdl check` + ja-space + pnpm-policy + no-suppress）。続けて`pnpm dedupe:check`と`pnpm audit`を実行 |
+| `lint`               | `pnpm lint`（`biome ci` + `rumdl check` + ja-space + pnpm-policy + no-suppress）。続けて`pnpm dedupe:check`を実行 |
+| `audit (weekly)`     | `pnpm audit`。週1回の定期実行のときだけ動く（PRでは動かない） |
+| `mutation`           | `pnpm mutation`（ミューテーションテストの全件。生き残りかテストの届かないミュータントがあれば失敗） |
 | `fallow`             | `pnpm fallow`（デッドコード / 循環依存 / 重複 / ヘルス / 境界）。PRでは`fallow audit --gate new-only`も実行 |
 | `typecheck`          | `pnpm typecheck`（`wxt prepare && tsc --noEmit`）                    |
 | `test`               | `pnpm test:coverage` → カバレッジartifact `coverage`                |
@@ -175,7 +177,7 @@ Nix外でローカル検証する場合のみ`CHROME_PATH=/usr/bin/google-chrome
   ```
 
   まとめて実行する場合は`pnpm check:all`（`check` + `test:coverage` + `build` +
-  `test:e2e` + `dedupe:check` + `audit`）を使います。
+  `test:e2e` + `dedupe:check`）を使います。
 - **Nixジョブ** はコミット済みの`flake.lock`を使います。`nixpkgs`は
   `nixos-26.05`の、7日以上経過したrevに固定されています。devShellには
   `shellcheck`と`actionlint`が入っており、CIの`nix`ジョブが
@@ -237,9 +239,9 @@ pnpm fallow:audit    # origin/main 基準の差分監査（新規の問題のみ
   `src/core`ゾーンでは`Date.now` / `Math.random` / `chrome.*` / `browser.*` /
   `globalThis.chrome`の呼び出しも禁止します。
 - `entry`は指定しません。WXTプラグインがエントリポイントを自動検出します。
-- `fallow`は **3.38.1に固定**しています。7日ポリシーにより、
-  `>=3.42.0`（`GHSA-rg8g-qqf6-7q69`と`GHSA-h858-c8f4-h92c`、いずれもLowを修正）へは
-  **2026-11-17 16:28 JST以降**に上げてください。
+- `ignoreExports`で、`src/services/messages.ts`の4つのexportを`duplicate-exports`の対象から
+  外しています。entrypointsが`src/core`を直接importしないよう、`src/core/messages.ts`と同じ名前で
+  再エクスポートしているためです。
 
 ## mutator（ミューテーションテスト）
 
@@ -248,21 +250,39 @@ pnpm fallow:audit    # origin/main 基準の差分監査（新規の問題のみ
 
 ```bash
 pnpm mutation       # 全件を実行。レポートは .mutator/report/index.html
-pnpm mutation:diff  # origin/main との差分だけ実行し、生き残りがあると失敗
+pnpm mutation:diff  # origin/main との差分にあるミュータントだけ実行
 ```
 
-- `pnpm check`は`pnpm mutation:diff`を含みます。差分にミュータントが無ければ何も実行しません。
-- 生き残ったミュータントは、テストを足して落とします。どんな入力でも振る舞いが変わらない
-  等価ミュータントは、`pnpm exec mutator accept <key> --reason <理由>`で
-  `mutator.accepted.json`に記録します。
-- CIでは実行しません。
+どちらも、テストが検出できないミュータント（生き残り）と、どのテストも届かないミュータントが
+1つでもあれば失敗します。
 
-外すときは、次の4つを消します。
+- **手元**: `pnpm check`の最後で`pnpm mutation:diff`を実行します。差分にミュータントが無ければ、
+  テストを1回流すだけで終わります。`origin/main`が無い環境（`.git`の無い展開先や浅いclone）では、
+  その旨を表示して何もしません。
+- **CI**: `mutation`ジョブが`pnpm mutation`で全件を実行します。テストを弱めたり消したりしただけの
+  変更は差分実行では検出できないので、CIは全件にしています。
+- `pnpm mutation` / `pnpm mutation:diff`を単独で実行する前に、`pnpm typecheck`（または
+  `pnpm exec wxt prepare`）で`.wxt/`を作っておきます。`pnpm test`と同じ前提です。
+- 検出できなかったミュータントは、テストを足して落とします。
+- どんな入力でも振る舞いが変わらない等価ミュータントだけを、理由を付けて
+  `mutator.accepted.json`に記録します。キーは`pnpm exec mutator --reporter agent`の出力の
+  `gaps[].key`にあります。
 
-1. `package.json`の`mutation` / `mutation:diff`スクリプトと、`check`の`&& pnpm mutation:diff`
-2. `mutator.config.json`（あれば`mutator.accepted.json`も）
+  ```bash
+  pnpm exec mutator accept <key> --reason "equivalent: <理由>"
+  ```
+
+外すときは、次を消します。
+
+1. `package.json`の`mutation` / `mutation:diff`スクリプト、`check`の`&& pnpm mutation:diff`、
+   `clean`の`.mutator`
+2. `mutator.config.json`と`mutator.accepted.json`
 3. devDependencyの`@mizchi/mutator`（`pnpm remove @mizchi/mutator`）
-4. `AGENTS.md`とこのREADMEのmutatorの記述
+4. `.github/workflows/ci.yml`の`mutation`ジョブと、`.github/settings/ruleset-main.json`の
+   `mutation`
+5. `.mutator`の除外（`.gitignore`、`biome.json`、`.rumdl.toml`、`.fallowrc.json`、
+   `scripts/ja-space-files.ts`）
+6. `AGENTS.md`とこのREADMEのmutatorの記述
 
 ## lefthook（Gitフック）
 
@@ -325,7 +345,7 @@ Markdownは[rumdl](https://github.com/rvben/rumdl) 0.3.2で検査します（`pn
 2. **Secret scanning** と **push protection** をオンにする（公開リポジトリでは利用できます）。
 3. **Private vulnerability reporting** をオンにする（手順は [`SECURITY.md`](./SECURITY.md)）。
 4. **`.github/workflows/actions.lock`をコミットし、`verify-lockfile`ジョブが通ってから** Settings → Actions → Policiesで **Require lockfile** をActiveにする。lockfileが無い状態でActiveにするとワークフローが止まります。FreeプランにEvaluateモードはありません。
-5. **`main`のブランチルールセット**（Settings → Rules → Rulesets）: 直接pushを禁止し、PRを必須にする。必須ステータスに`lint` / `fallow` / `typecheck` / `test` / `build` / `e2e` / `nix` / `verify-lockfile` / CodeQL / dependency-reviewを含める。force pushを禁止する。
+5. **`main`のブランチルールセット**（Settings → Rules → Rulesets）: 直接pushを禁止し、PRを必須にする。必須ステータスに`lint` / `fallow` / `typecheck` / `test` / `mutation` / `build` / `e2e` / `nix` / `verify-lockfile` / CodeQL / dependency-reviewを含める。force pushを禁止する。
 6. 拡張を **GitHub Releases** で配るときに **immutable releases** をオンにする。
 
 ---
@@ -370,13 +390,13 @@ Markdownは[rumdl](https://github.com/rvben/rumdl) 0.3.2で検査します（`pn
 | `pnpm test:e2e`   | ビルド + Playwright E2E            |
 | `pnpm fallow`     | fallowでデッドコード / 循環依存 / 重複 / ヘルス / 境界を解析 |
 | `pnpm fallow:audit` | `origin/main`を基準にしたfallow監査（新規のみ） |
-| `pnpm mutation`   | ミューテーションテスト（`src/core` / `src/services`の全件。レポートは`.mutator/report`） |
-| `pnpm mutation:diff` | `origin/main`との差分だけミューテーションテストを実行し、生き残りがあると失敗 |
+| `pnpm mutation`   | ミューテーションテスト（`src/core` / `src/services`の全件。検出できないミュータントがあると失敗） |
+| `pnpm mutation:diff` | `origin/main`との差分にあるミュータントだけ実行。検出できないミュータントがあると失敗 |
 | `pnpm check`      | `lint` + `typecheck` + `test` + `fallow` + `mutation:diff` |
-| `pnpm check:all`  | `check` + `test:coverage` + `build` + `test:e2e` + `dedupe:check` + `audit` |
+| `pnpm check:all`  | `check` + `test:coverage` + `build` + `test:e2e` + `dedupe:check` |
 | `pnpm clean`      | 生成物（`.output` / `.wxt` / `coverage`等）を削除 |
 | `pnpm dedupe:check` | `pnpm dedupe --check`            |
-| `pnpm audit`      | `pnpm audit --audit-level moderate`|
+| `pnpm audit`      | `pnpm audit --audit-level moderate`（CIでは週1回の定期実行）|
 | `pnpm settings:check` | GitHub設定のドリフトを検出（読み取り専用）|
 | `pnpm settings:apply` | GitHub設定を適用               |
 

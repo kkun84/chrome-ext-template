@@ -1,6 +1,17 @@
 {
   "$schema": "./node_modules/fallow/schema.json",
   "ignorePatterns": [".output/**", ".wxt/**", "coverage/**", ".mutator/**"],
+  "ignoreExports": [
+    {
+      "file": "src/services/messages.ts",
+      "exports": [
+        "decodeRequestEnvelope",
+        "ListSavedUrlsRequest",
+        "RequestEnvelope",
+        "SaveCurrentTabRequest"
+      ]
+    }
+  ],
   "rules": {
     "unused-dev-dependencies": "error",
     "circular-dependencies": "error",

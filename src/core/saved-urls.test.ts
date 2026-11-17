@@ -20,6 +20,7 @@ describe("normalizeUrl", () => {
     const result = normalizeUrl("   ");
     expect(result.ok).toBe(false);
     if (!result.ok) {
+      expect(result.error._tag).toBe("UrlRejected");
       expect(result.error.reason).toBe("empty");
     }
   });
@@ -107,6 +108,6 @@ describe("SavedUrlList decoding", () => {
     const { decodeSavedUrlList } = await import("./saved-urls.js");
     const stored = addUrl(SavedUrlList.empty, url("https://a.example"), 1).list;
     const raw: unknown = JSON.parse(JSON.stringify(stored));
-    expect(listUrls(decodeSavedUrlList(raw))).toEqual(["https://a.example/"]);
+    expect(decodeSavedUrlList(raw).entries).toEqual(stored.entries);
   });
 });

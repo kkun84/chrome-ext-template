@@ -57,7 +57,7 @@ entrypoints  →  layers / services  →  core
 - 作業を終える前に **`pnpm check`**（`lint` + `typecheck` + `test` + `fallow` + `mutation:diff`）を
   実行し、通ることを確認する。
 - リリース / CI相当のフル検証では **`pnpm check:all`**（`check` + `test:coverage` +
-  `build` + `test:e2e` + `dedupe:check` + `audit`）も実行する。
+  `build` + `test:e2e` + `dedupe:check`）も実行する。
 
 ## Machine-enforced rules
 
@@ -94,10 +94,12 @@ entrypoints  →  layers / services  →  core
   services → core`）と、coreゾーンでの禁止呼び出し（`Date.now`、`Math.random`、
   `chrome.*`、`browser.*`、`globalThis.chrome`）を検出する。`fallow audit`の
   `added-suppression`は`error`（新規の抑制コメントを拒否）。
-- **mutator**（`mutator.config.json`、`pnpm mutation:diff`）: `origin/main`との差分に含まれる
-  `src/core` / `src/services`のミュータントを実行し、生き残りがあると失敗する。`pnpm check`の
-  一部として実行される。生き残りはテストを足して落とす。等価ミュータントだけを
-  `pnpm exec mutator accept <key> --reason <理由>`で`mutator.accepted.json`に記録する。
+- **mutator**（`mutator.config.json`）: `src/core` / `src/services`のミュータントを実行し、
+  テストが検出できないミュータント（生き残りと、テストの届かないもの）があると失敗する。
+  `pnpm check`は`pnpm mutation:diff`で`origin/main`との差分だけを、CIの`mutation`ジョブは
+  `pnpm mutation`で全件を実行する。検出できないミュータントはテストを足して落とす。
+  等価ミュータントだけを`pnpm exec mutator accept <key> --reason <理由>`で
+  `mutator.accepted.json`に記録する（キーは`pnpm exec mutator --reporter agent`の`gaps[].key`）。
 - **TypeScript**（`tsconfig.json`）: `strict`、`noUncheckedIndexedAccess`、
   `exactOptionalPropertyTypes`、`noImplicitOverride`、`noPropertyAccessFromIndexSignature`、
   `noFallthroughCasesInSwitch`、`useUnknownInCatchVariables`、`verbatimModuleSyntax`、
@@ -108,8 +110,8 @@ entrypoints  →  layers / services  →  core
   日本語タイポグラフィの`--fix`、pre-pushは`pnpm check`。globは再帰形（`**/*.{...}`）で
   サブディレクトリのファイルも対象にする。
 - **CI**（`.github/workflows/ci.yml`）: `pnpm lint`（`biome ci`）、fallow、typecheck、
-  tests + coverage、build、e2e、nix flake check + shellcheck/actionlint、
-  `pnpm dedupe --check`、`pnpm audit`。
+  tests + coverage、mutation（全件）、build、e2e、nix flake check + shellcheck/actionlint、
+  `pnpm dedupe --check`。`pnpm audit`は週1回の定期実行だけで動く。
 
 ## よく使うコマンド
 
@@ -131,12 +133,12 @@ pnpm test:e2e      # ビルド + Playwright
 pnpm fallow        # fallow（デッドコード / 循環依存 / 重複 / ヘルス / 境界）
 pnpm fallow:audit  # origin/main 基準の差分監査（新規のみ）
 pnpm mutation      # ミューテーションテスト（全件。レポートは .mutator/report）
-pnpm mutation:diff # origin/main との差分だけ実行し、生き残りで失敗
+pnpm mutation:diff # origin/main との差分だけ実行
 pnpm check         # lint + typecheck + test + fallow + mutation:diff
-pnpm check:all     # check + coverage + build + e2e + dedupe + audit
+pnpm check:all     # check + coverage + build + e2e + dedupe
 pnpm clean         # 生成物（.output / .wxt / coverage 等）を削除
 pnpm dedupe:check  # pnpm dedupe --check
-pnpm audit         # pnpm audit（moderate 以上）
+pnpm audit         # pnpm audit（moderate 以上。CI では週1回）
 pnpm settings:check # GitHub 設定のドリフト検出
 pnpm settings:apply # GitHub 設定を適用
 ```
@@ -148,13 +150,13 @@ pnpm settings:apply # GitHub 設定を適用
 - `pre-commit`はstagedの対象ファイルに`biome check --write`と`rumdl check`（`*.md`）、
   日本語タイポグラフィの`--fix`（`*.{md,ts,tsx,js,yml,yaml,sh,html}`）を実行し、`pre-push`は
   `pnpm check`（lint + typecheck + test + fallow + mutation:diff）を実行します。
-- `fallow`は`3.38.1`に固定（7日ポリシー）。`>=3.42.0`へは2026-11-17 16:28 JST以降に上げる。
 
 ## CI（GitHub Actions）
 
 `.github/workflows/ci.yml`が`push` / `pull_request`で`lint` / `fallow` /
-`typecheck` / `test`（カバレッジ）/ `build` / `e2e` / `nix`を実行します。`lint`ジョブは
-`pnpm lint`（`biome ci`）に加えて`pnpm dedupe:check`と`pnpm audit`を実行し、
+`typecheck` / `test`（カバレッジ）/ `mutation` / `build` / `e2e` / `nix`を実行します。`lint`ジョブは
+`pnpm lint`（`biome ci`）に加えて`pnpm dedupe:check`を実行し、`pnpm audit`は週1回の定期実行の
+`audit`ジョブだけが実行します（PRで増える依存は`dependency-review`が検査します）。
 `nix`ジョブは`nix flake check`とdevShellのrealizeの後に
 `shellcheck scripts/*.sh && actionlint`を実行します。artifact
 （カバレッジ・拡張のunpacked/zip・失敗時のPlaywright trace/screenshot）は
