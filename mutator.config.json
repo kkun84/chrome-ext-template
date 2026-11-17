@@ -1,0 +1,4 @@
+{
+  "include": ["src/core/**/*.ts", "src/services/**/*.ts"],
+  "reporters": ["text", "html", "json"]
+}

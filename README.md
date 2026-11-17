@@ -8,6 +8,7 @@ Windows + WSLで開発し、Windows側のChromeにunpacked拡張として読み�
 - **TypeScript 7.0.2** — Goネイティブの`tsc`（型チェック専用。TS JS APIは不要）
 - **Vitest 5** — `src/core`の純関数ユニットテスト（カバレッジは`@vitest/coverage-v8`）
 - **Playwright 1.59.1** — ビルド済み拡張のE2E（nixpkgs `playwright-driver`と一致させるため固定）
+- **mutator 0.2.0** — ミューテーションテスト（`pnpm mutation`。`pnpm check`は差分だけ実行）
 - **Biome 2.6.4** — lint / format（`pnpm lint` = `biome ci`、assistでimport整理）
 - **rumdl 0.3.2** — Markdownのlint（`pnpm lint:md`、日本語ドキュメントのため`MD013`のみ無効）
 - **fallow 3.38.1** — デッドコード / 循環依存 / 重複 / ヘルススコア / アーキテクチャ境界の解析
@@ -166,7 +167,7 @@ Nix外でローカル検証する場合のみ`CHROME_PATH=/usr/bin/google-chrome
 
   ```bash
   pnpm install --frozen-lockfile
-  pnpm check          # lint + typecheck + test + fallow
+  pnpm check          # lint + typecheck + test + fallow + mutation:diff
   pnpm test:coverage
   pnpm build && pnpm zip
   pnpm exec playwright install --with-deps chromium   # 初回のみ
@@ -240,6 +241,29 @@ pnpm fallow:audit    # origin/main 基準の差分監査（新規の問題のみ
   `>=3.42.0`（`GHSA-rg8g-qqf6-7q69`と`GHSA-h858-c8f4-h92c`、いずれもLowを修正）へは
   **2026-11-17 16:28 JST以降**に上げてください。
 
+## mutator（ミューテーションテスト）
+
+[@mizchi/mutator](https://github.com/mizchi/mutator) で、テストが実装の変更を検出できるかを確かめます。
+対象は`mutator.config.json`の`include`（`src/core`と`src/services`）です。
+
+```bash
+pnpm mutation       # 全件を実行。レポートは .mutator/report/index.html
+pnpm mutation:diff  # origin/main との差分だけ実行し、生き残りがあると失敗
+```
+
+- `pnpm check`は`pnpm mutation:diff`を含みます。差分にミュータントが無ければ何も実行しません。
+- 生き残ったミュータントは、テストを足して落とします。どんな入力でも振る舞いが変わらない
+  等価ミュータントは、`pnpm exec mutator accept <key> --reason <理由>`で
+  `mutator.accepted.json`に記録します。
+- CIでは実行しません。
+
+外すときは、次の4つを消します。
+
+1. `package.json`の`mutation` / `mutation:diff`スクリプトと、`check`の`&& pnpm mutation:diff`
+2. `mutator.config.json`（あれば`mutator.accepted.json`も）
+3. devDependencyの`@mizchi/mutator`（`pnpm remove @mizchi/mutator`）
+4. `AGENTS.md`とこのREADMEのmutatorの記述
+
 ## lefthook（Gitフック）
 
 [lefthook](https://lefthook.dev/) でpre-commit / pre-pushフックを管理します。
@@ -247,7 +271,7 @@ pnpm fallow:audit    # origin/main 基準の差分監査（新規の問題のみ
 - フックは`prepare`スクリプト（`pnpm install` → `lefthook install`）でインストールされます。
 - フックをスキップするには`LEFTHOOK=0`を設定します（例: `LEFTHOOK=0 git commit ...`）。
 - `pre-commit`はstagedの対象ファイルに`biome check --write`（`**/*.{js,jsx,ts,tsx,json,css}`）と`rumdl check`（`**/*.md`）、日本語タイポグラフィの`--fix`（`**/*.{md,ts,tsx,js,yml,yaml,sh,html}`）を実行し、修正をstageします。globは再帰形なのでサブディレクトリのファイルも対象です。
-- `pre-push`は`pnpm check`（lint + typecheck + test + fallow）を実行します。
+- `pre-push`は`pnpm check`（lint + typecheck + test + fallow + mutation:diff）を実行します。
 - 設定は [`lefthook.yml`](./lefthook.yml)。
 - `lefthook`は`2.2.1`に固定しています。npm provenanceを持ち、かつ7日ポリシーを満たす後続リリースが出るまでは`2.2.1`のままにします（その条件を満たした時点で上げます）。
 
@@ -346,7 +370,9 @@ Markdownは[rumdl](https://github.com/rvben/rumdl) 0.3.2で検査します（`pn
 | `pnpm test:e2e`   | ビルド + Playwright E2E            |
 | `pnpm fallow`     | fallowでデッドコード / 循環依存 / 重複 / ヘルス / 境界を解析 |
 | `pnpm fallow:audit` | `origin/main`を基準にしたfallow監査（新規のみ） |
-| `pnpm check`      | `lint` + `typecheck` + `test` + `fallow` |
+| `pnpm mutation`   | ミューテーションテスト（`src/core` / `src/services`の全件。レポートは`.mutator/report`） |
+| `pnpm mutation:diff` | `origin/main`との差分だけミューテーションテストを実行し、生き残りがあると失敗 |
+| `pnpm check`      | `lint` + `typecheck` + `test` + `fallow` + `mutation:diff` |
 | `pnpm check:all`  | `check` + `test:coverage` + `build` + `test:e2e` + `dedupe:check` + `audit` |
 | `pnpm clean`      | 生成物（`.output` / `.wxt` / `coverage`等）を削除 |
 | `pnpm dedupe:check` | `pnpm dedupe --check`            |

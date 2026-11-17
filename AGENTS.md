@@ -54,7 +54,7 @@ entrypoints  →  layers / services  →  core
 
 ## Definition of done
 
-- 作業を終える前に **`pnpm check`**（`lint` + `typecheck` + `test` + `fallow`）を
+- 作業を終える前に **`pnpm check`**（`lint` + `typecheck` + `test` + `fallow` + `mutation:diff`）を
   実行し、通ることを確認する。
 - リリース / CI相当のフル検証では **`pnpm check:all`**（`check` + `test:coverage` +
   `build` + `test:e2e` + `dedupe:check` + `audit`）も実行する。
@@ -94,6 +94,10 @@ entrypoints  →  layers / services  →  core
   services → core`）と、coreゾーンでの禁止呼び出し（`Date.now`、`Math.random`、
   `chrome.*`、`browser.*`、`globalThis.chrome`）を検出する。`fallow audit`の
   `added-suppression`は`error`（新規の抑制コメントを拒否）。
+- **mutator**（`mutator.config.json`、`pnpm mutation:diff`）: `origin/main`との差分に含まれる
+  `src/core` / `src/services`のミュータントを実行し、生き残りがあると失敗する。`pnpm check`の
+  一部として実行される。生き残りはテストを足して落とす。等価ミュータントだけを
+  `pnpm exec mutator accept <key> --reason <理由>`で`mutator.accepted.json`に記録する。
 - **TypeScript**（`tsconfig.json`）: `strict`、`noUncheckedIndexedAccess`、
   `exactOptionalPropertyTypes`、`noImplicitOverride`、`noPropertyAccessFromIndexSignature`、
   `noFallthroughCasesInSwitch`、`useUnknownInCatchVariables`、`verbatimModuleSyntax`、
@@ -126,7 +130,9 @@ pnpm test:coverage # Vitest + カバレッジ
 pnpm test:e2e      # ビルド + Playwright
 pnpm fallow        # fallow（デッドコード / 循環依存 / 重複 / ヘルス / 境界）
 pnpm fallow:audit  # origin/main 基準の差分監査（新規のみ）
-pnpm check         # lint + typecheck + test + fallow
+pnpm mutation      # ミューテーションテスト（全件。レポートは .mutator/report）
+pnpm mutation:diff # origin/main との差分だけ実行し、生き残りで失敗
+pnpm check         # lint + typecheck + test + fallow + mutation:diff
 pnpm check:all     # check + coverage + build + e2e + dedupe + audit
 pnpm clean         # 生成物（.output / .wxt / coverage 等）を削除
 pnpm dedupe:check  # pnpm dedupe --check
@@ -141,7 +147,7 @@ pnpm settings:apply # GitHub 設定を適用
   インストールします。フックをスキップするには`LEFTHOOK=0`を設定します。
 - `pre-commit`はstagedの対象ファイルに`biome check --write`と`rumdl check`（`*.md`）、
   日本語タイポグラフィの`--fix`（`*.{md,ts,tsx,js,yml,yaml,sh,html}`）を実行し、`pre-push`は
-  `pnpm check`（lint + typecheck + test + fallow）を実行します。
+  `pnpm check`（lint + typecheck + test + fallow + mutation:diff）を実行します。
 - `fallow`は`3.38.1`に固定（7日ポリシー）。`>=3.42.0`へは2026-11-17 16:28 JST以降に上げる。
 
 ## CI（GitHub Actions）

@@ -15,7 +15,7 @@
 [global]
 flavor = "standard"
 respect_gitignore = true
-exclude = ["node_modules", ".output", ".wxt", "coverage"]
+exclude = ["node_modules", ".output", ".wxt", "coverage", ".mutator"]
 
 [MD013]
 # Japanese prose: line length is the renderer's job, not the linter's.
