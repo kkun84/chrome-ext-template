@@ -71,6 +71,13 @@ describe("addUrl", () => {
     ]);
   });
 
+  it("reports alreadySaved as false when the list holds only other URLs", () => {
+    const first = addUrl(SavedUrlList.empty, url("https://a.example"), 1);
+    const second = addUrl(first.list, url("https://b.example"), 2);
+    expect(first.alreadySaved).toBe(false);
+    expect(second.alreadySaved).toBe(false);
+  });
+
   it("moves an existing duplicate to the front", () => {
     const a = addUrl(SavedUrlList.empty, url("https://a.example"), 1);
     const b = addUrl(a.list, url("https://b.example"), 2);
@@ -94,5 +101,12 @@ describe("SavedUrlList decoding", () => {
     const { decodeSavedUrlList } = await import("./saved-urls.js");
     expect(decodeSavedUrlList(undefined).entries).toEqual([]);
     expect(decodeSavedUrlList({ entries: "nope" }).entries).toEqual([]);
+  });
+
+  it("decodes a stored payload back into the same list", async () => {
+    const { decodeSavedUrlList } = await import("./saved-urls.js");
+    const stored = addUrl(SavedUrlList.empty, url("https://a.example"), 1).list;
+    const raw: unknown = JSON.parse(JSON.stringify(stored));
+    expect(listUrls(decodeSavedUrlList(raw))).toEqual(["https://a.example/"]);
   });
 });
