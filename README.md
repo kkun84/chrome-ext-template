@@ -153,7 +153,7 @@ Nix外でローカル検証する場合のみ`CHROME_PATH=/usr/bin/google-chrome
 | -------------------- | -------------------------------------------------------------------- |
 | `lint`               | `pnpm lint`（`biome ci` + `rumdl check` + ja-space + pnpm-policy + no-suppress）。続けて`pnpm dedupe:check`を実行 |
 | `audit (weekly)`     | `pnpm audit`。週1回の定期実行のときだけ動く（PRでは動かない） |
-| `mutation`           | `pnpm mutation`（ミューテーションテストの全件。生き残りかテストの届かないミュータントがあれば失敗） |
+| `mutation`           | ミューテーションテスト。PRでは変更した行の検出漏れを警告として表示し、続けて全件のスコアを出す。失敗にはしない |
 | `fallow`             | `pnpm fallow`（デッドコード / 循環依存 / 重複 / ヘルス / 境界）。PRでは`fallow audit --gate new-only`も実行 |
 | `typecheck`          | `pnpm typecheck`（`wxt prepare && tsc --noEmit`）                    |
 | `test`               | `pnpm test:coverage` → カバレッジartifact `coverage`                |
@@ -253,17 +253,21 @@ pnpm mutation       # 全件を実行。レポートは .mutator/report/index.ht
 pnpm mutation:diff  # origin/main との差分にあるミュータントだけ実行
 ```
 
-どちらも、テストが検出できないミュータント（生き残り）と、どのテストも届かないミュータントが
-1つでもあれば失敗します。
+結果は、テストを見直すための指標です。検出できないミュータント（生き残りと、どのテストも届かないもの）が
+あっても失敗にはしません。テストが元々落ちている場合だけ失敗します。
 
 - **手元**: `pnpm check`の最後で`pnpm mutation:diff`を実行します。差分にミュータントが無ければ、
   テストを1回流すだけで終わります。`origin/main`が無い環境（`.git`の無い展開先や浅いclone）では、
   その旨を表示して何もしません。
-- **CI**: `mutation`ジョブが`pnpm mutation`で全件を実行します。テストを弱めたり消したりしただけの
-  変更は差分実行では検出できないので、CIは全件にしています。
+- **CI**: `mutation`ジョブが、PRでは変更した行のミュータントを実行し、検出できなかったもの
+  （どのテストも届かないものを含む）をPRの差分に警告として表示します。続けて`pnpm mutation`で
+  全件を実行し、全体のスコアを出します。テストを弱めたり消したりしただけの変更は、全件の結果に
+  現れます。
 - `pnpm mutation` / `pnpm mutation:diff`を単独で実行する前に、`pnpm typecheck`（または
   `pnpm exec wxt prepare`）で`.wxt/`を作っておきます。`pnpm test`と同じ前提です。
-- 検出できなかったミュータントは、テストを足して落とします。
+- 検出できなかったミュータントは、テストが足りないのか、コードが要らないのかを考えます。
+  テストを足すときは、呼び出す側から見える振る舞いを確かめます。数字を満たすためだけのテストは
+  書きません。手順は`node_modules/@mizchi/mutator/skills/mutation-test-loop/SKILL.md`にあります。
 - どんな入力でも振る舞いが変わらない等価ミュータントだけを、理由を付けて
   `mutator.accepted.json`に記録します。キーは`pnpm exec mutator --reporter agent`の出力の
   `gaps[].key`にあります。
@@ -390,8 +394,8 @@ Markdownは[rumdl](https://github.com/rvben/rumdl) 0.3.2で検査します（`pn
 | `pnpm test:e2e`   | ビルド + Playwright E2E            |
 | `pnpm fallow`     | fallowでデッドコード / 循環依存 / 重複 / ヘルス / 境界を解析 |
 | `pnpm fallow:audit` | `origin/main`を基準にしたfallow監査（新規のみ） |
-| `pnpm mutation`   | ミューテーションテスト（`src/core` / `src/services`の全件。検出できないミュータントがあると失敗） |
-| `pnpm mutation:diff` | `origin/main`との差分にあるミュータントだけ実行。検出できないミュータントがあると失敗 |
+| `pnpm mutation`   | ミューテーションテスト（`src/core` / `src/services`の全件。結果を表示するだけ） |
+| `pnpm mutation:diff` | `origin/main`との差分にあるミュータントだけ実行。結果を表示するだけ |
 | `pnpm check`      | `lint` + `typecheck` + `test` + `fallow` + `mutation:diff` |
 | `pnpm check:all`  | `check` + `test:coverage` + `build` + `test:e2e` + `dedupe:check` |
 | `pnpm clean`      | 生成物（`.output` / `.wxt` / `coverage`等）を削除 |

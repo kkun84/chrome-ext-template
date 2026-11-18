@@ -95,9 +95,13 @@ entrypoints  →  layers / services  →  core
   `chrome.*`、`browser.*`、`globalThis.chrome`）を検出する。`fallow audit`の
   `added-suppression`は`error`（新規の抑制コメントを拒否）。
 - **mutator**（`mutator.config.json`）: `src/core` / `src/services`のミュータントを実行し、
-  テストが検出できないミュータント（生き残りと、テストの届かないもの）があると失敗する。
-  `pnpm check`は`pnpm mutation:diff`で`origin/main`との差分だけを、CIの`mutation`ジョブは
-  `pnpm mutation`で全件を実行する。検出できないミュータントはテストを足して落とす。
+  テストが検出できないミュータントを表示する。失敗にはしない。`pnpm check`は`pnpm mutation:diff`で
+  `origin/main`との差分だけを実行する。CIの`mutation`ジョブは、PRで変更した行の検出漏れを
+  警告として表示し、全件のスコアも出す。
+  `src/core` / `src/services`を変えたら、`pnpm mutation:diff`の結果を見直す。検出できないミュータントは、
+  テストが足りないのか、コードが要らないのかを判断する。テストを足すときは、呼び出す側から見える
+  振る舞いを確かめる。ミュータントを落とすためだけに実装をなぞるテストは書かない。手順は
+  `node_modules/@mizchi/mutator/skills/mutation-test-loop/SKILL.md`に従う。
   等価ミュータントだけを`pnpm exec mutator accept <key> --reason <理由>`で
   `mutator.accepted.json`に記録する（キーは`pnpm exec mutator --reporter agent`の`gaps[].key`）。
 - **TypeScript**（`tsconfig.json`）: `strict`、`noUncheckedIndexedAccess`、
@@ -110,7 +114,7 @@ entrypoints  →  layers / services  →  core
   日本語タイポグラフィの`--fix`、pre-pushは`pnpm check`。globは再帰形（`**/*.{...}`）で
   サブディレクトリのファイルも対象にする。
 - **CI**（`.github/workflows/ci.yml`）: `pnpm lint`（`biome ci`）、fallow、typecheck、
-  tests + coverage、mutation（全件）、build、e2e、nix flake check + shellcheck/actionlint、
+  tests + coverage、mutation（全件。結果の表示だけ）、build、e2e、nix flake check + shellcheck/actionlint、
   `pnpm dedupe --check`。`pnpm audit`は週1回の定期実行だけで動く。
 
 ## よく使うコマンド
