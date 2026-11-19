@@ -1,10 +1,10 @@
 {
   "1nab3m9bcx9": {
-    "reason": "equivalent: the Schema.Class identifier only labels the schema in error messages; decoding and construction do not depend on it",
+    "reason": "equivalent for this code: the Schema.Class identifier only changes the class label in error messages and String() of instances; decoding, encoding, instanceof and construction do not depend on it, and no code reads String() of these classes",
     "where": "src/core/saved-urls.ts:8:57 \"SavedUrlEntry\" -> \"\""
   },
   "24kf2yb015t": {
-    "reason": "equivalent: the Schema.Class identifier only labels the schema in error messages; decoding and construction do not depend on it",
+    "reason": "equivalent for this code: the Schema.Class identifier only changes the class label in error messages and String() of instances; decoding, encoding, instanceof and construction do not depend on it, and no code reads String() of these classes",
     "where": "src/core/saved-urls.ts:14:62 \"SavedUrlList\" -> \"\""
   },
   "d20yosrzzc": {

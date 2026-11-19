@@ -61,7 +61,7 @@ entrypoints  →  layers / services  →  core
 
 ## Machine-enforced rules
 
-規約は文章だけでなく、次のツールで機械的に強制されます（すべて`error`）。
+規約は文章だけでなく、次のツールで機械的に強制されます（mutatorを除き、すべて`error`）。
 
 - **Biome**（`biome.json`、`pnpm lint` = `biome ci .`）:
   format / recommended lint、`noExplicitAny`（`any`禁止）、`noImplicitAnyLet`、
@@ -97,7 +97,7 @@ entrypoints  →  layers / services  →  core
 - **mutator**（`mutator.config.json`）: `src/core` / `src/services`のミュータントを実行し、
   テストが検出できないミュータントを表示する。失敗にはしない。`pnpm check`は`pnpm mutation:diff`で
   `origin/main`との差分だけを実行する。CIの`mutation`ジョブは、PRで変更した行の検出漏れを
-  警告として表示し、全件のスコアも出す。
+  警告として表示し、全件のスコアをジョブの概要に出す（テストを消しただけの変更はここで分かる）。
   `src/core` / `src/services`を変えたら、`pnpm mutation:diff`の結果を見直す。検出できないミュータントは、
   テストが足りないのか、コードが要らないのかを判断する。テストを足すときは、呼び出す側から見える
   振る舞いを確かめる。ミュータントを落とすためだけに実装をなぞるテストは書かない。手順は
@@ -105,7 +105,7 @@ entrypoints  →  layers / services  →  core
   等価ミュータントだけを`pnpm exec mutator accept <key> --reason <理由>`で
   `mutator.accepted.json`に記録する（キーは`pnpm exec mutator --reporter agent`の`gaps[].key`）。
   テストを弱めた変更を通すために記録してはいけない。ミューテーションテストから外すものは、
-  コメントではなく`mutator.config.json`の`exclude`に書く。PRで`mutator.config.json` /
+  コメントではなく`mutator.config.json`の`exclude`に書く。PRで`mutator.config.*` /
   `mutator.accepted.json`を変えると、CIが警告を出す。
 - **TypeScript**（`tsconfig.json`）: `strict`、`noUncheckedIndexedAccess`、
   `exactOptionalPropertyTypes`、`noImplicitOverride`、`noPropertyAccessFromIndexSignature`、
@@ -145,7 +145,7 @@ pnpm check         # lint + typecheck + test + fallow + mutation:diff
 pnpm check:all     # check + coverage + build + e2e + dedupe
 pnpm clean         # 生成物（.output / .wxt / coverage 等）を削除
 pnpm dedupe:check  # pnpm dedupe --check
-pnpm audit         # pnpm audit（moderate 以上。CI では週1回）
+pnpm run audit     # pnpm audit --audit-level moderate（CI では週1回）
 pnpm settings:check # GitHub 設定のドリフト検出
 pnpm settings:apply # GitHub 設定を適用
 ```
@@ -182,7 +182,7 @@ Actions実行ページのArtifactsから取得できます。
   `@playwright/test`はnixpkgs `playwright-driver`（1.59.1）と整合が必要なため
   自動更新から除外しています。nixエコシステムはコミット済みの`flake.lock`を
   更新対象にします。
-- **TypeScript 7**（`tsc`のみ、JS API不使用）。Vite 8 / WXTはTS APIを必要と
+- **TypeScript 7**（`tsc`のみ。JS APIはmutatorの型判定だけが使う）。Vite 8 / WXTはTS APIを必要と
   しません。`vite@8.3.5`はWXTの必須peerとして直接devDependencyに追加。
 - **サプライチェーン**: pnpmは`minimumReleaseAge: 10080` / installスクリプト
   ブロック（`onlyBuiltDependencies`）/ `trustPolicy: no-downgrade` /

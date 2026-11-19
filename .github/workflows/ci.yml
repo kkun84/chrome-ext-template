@@ -32,7 +32,9 @@ on:
 
 # Cancel superseded runs on the same ref.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  # The weekly schedule and a push to main share the ref, so the event name
+  # keeps one from cancelling the other.
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 # Least privilege by default. Jobs that upload artifacts re-grant `actions:
@@ -82,7 +84,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: pnpm audit
-        run: pnpm audit
+        run: pnpm run audit
 
   fallow:
     name: fallow
@@ -202,16 +204,22 @@ jobs:
       - name: Mutation settings changes
         if: github.event_name == 'pull_request'
         run: |
-          for file in mutator.config.json mutator.accepted.json; do
-            if ! git diff --quiet "origin/${GITHUB_BASE_REF}...HEAD" -- "$file"; then
+          git diff --name-only "origin/${GITHUB_BASE_REF}...HEAD" -- 'mutator.config.*' mutator.accepted.json |
+            while read -r file; do
               echo "::warning file=${file},title=ミューテーションテストの設定が変わった::${file}が変わりました。検査する範囲が狭まっていないか、動作の変わる壊し方を記録していないかを確かめてください。"
-            fi
-          done
-      # Every mutant, for the overall score. This also shows a change that only
-      # weakens or removes tests. Annotations are left to the step above, so
-      # GITHUB_ACTIONS is cleared here.
+            done
+      # Every mutant, for the overall score, written to the job summary. A
+      # change that only weakens or removes tests lowers this score.
+      # Annotations are left to the step above, so GITHUB_ACTIONS is cleared.
       - name: Mutation tests (all)
-        run: GITHUB_ACTIONS='' pnpm mutation
+        run: |
+          GITHUB_ACTIONS='' pnpm mutation | tee "$RUNNER_TEMP/mutation.txt"
+          {
+            echo "### ミューテーションテスト（全件）"
+            echo '```text'
+            grep -E '^(mutants|Killed|score)' "$RUNNER_TEMP/mutation.txt" || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
   build:
     name: build
