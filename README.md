@@ -385,7 +385,7 @@ Markdownは[rumdl](https://github.com/rvben/rumdl) 0.3.2で検査します（`pn
 | `pnpm lint:md`    | `rumdl check .`（Markdownのlint）|
 | `pnpm lint:ja-space` | 日本語と英数字の間の半角スペースを検査 |
 | `pnpm lint:pnpm-policy` | pnpmの供給網ポリシー（除外キー / 必須設定 / 禁止CLIオプション）を検査 |
-| `pnpm lint:no-suppress` | 抑制コメント（`biome-ignore` / `@ts-*` / `eslint-disable` / `fallow-ignore`）を検査 |
+| `pnpm lint:no-suppress` | 抑制コメント（`biome-ignore` / `@ts-*` / `eslint-disable` / `fallow-ignore` / `mutator-disable` / `Stryker disable`）を検査 |
 | `pnpm lint:fix`   | Biome + rumdl + 日本語タイポグラフィを自動修正 |
 | `pnpm fix`        | `lint:fix`の別名 |
 | `pnpm test`       | Vitestユニットテスト              |

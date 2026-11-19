@@ -197,6 +197,16 @@ jobs:
       - name: Mutation tests (changed lines)
         if: github.event_name == 'pull_request'
         run: pnpm exec mutator --since "origin/${GITHUB_BASE_REF}"
+      # Editing these files can narrow what mutation testing checks without
+      # any failure, so a pull request that touches them gets a warning.
+      - name: Mutation settings changes
+        if: github.event_name == 'pull_request'
+        run: |
+          for file in mutator.config.json mutator.accepted.json; do
+            if ! git diff --quiet "origin/${GITHUB_BASE_REF}...HEAD" -- "$file"; then
+              echo "::warning file=${file},title=ミューテーションテストの設定が変わった::${file}が変わりました。検査する範囲が狭まっていないか、動作の変わる壊し方を記録していないかを確かめてください。"
+            fi
+          done
       # Every mutant, for the overall score. This also shows a change that only
       # weakens or removes tests. Annotations are left to the step above, so
       # GITHUB_ACTIONS is cleared here.

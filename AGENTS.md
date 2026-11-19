@@ -87,7 +87,7 @@ entrypoints  →  layers / services  →  core
   オプションも検出する。`pnpm lint` / `pnpm check`の一部として実行される。
 - **no-suppress**（`scripts/lint-no-suppress.ts`、`pnpm lint:no-suppress`）:
   `biome-ignore` / `@ts-expect-error` / `@ts-ignore` / `@ts-nocheck` /
-  `eslint-disable` / `fallow-ignore`を**コメント**として書くことを禁止する（文字列や
+  `eslint-disable` / `fallow-ignore` / `mutator-disable` / `Stryker disable`を**コメント**として書くことを禁止する（文字列や
   Markdownの説明は対象外）。`pnpm lint` / `pnpm check`の一部として実行される。
 - **fallow**（`.fallowrc.json`、`pnpm fallow`）: デッドコード / 循環依存 / 重複 /
   ヘルスに加え、**architecture boundaries**（同じレイヤー方向。`entrypoints → layers /
@@ -104,6 +104,9 @@ entrypoints  →  layers / services  →  core
   `node_modules/@mizchi/mutator/skills/mutation-test-loop/SKILL.md`に従う。
   等価ミュータントだけを`pnpm exec mutator accept <key> --reason <理由>`で
   `mutator.accepted.json`に記録する（キーは`pnpm exec mutator --reporter agent`の`gaps[].key`）。
+  テストを弱めた変更を通すために記録してはいけない。ミューテーションテストから外すものは、
+  コメントではなく`mutator.config.json`の`exclude`に書く。PRで`mutator.config.json` /
+  `mutator.accepted.json`を変えると、CIが警告を出す。
 - **TypeScript**（`tsconfig.json`）: `strict`、`noUncheckedIndexedAccess`、
   `exactOptionalPropertyTypes`、`noImplicitOverride`、`noPropertyAccessFromIndexSignature`、
   `noFallthroughCasesInSwitch`、`useUnknownInCatchVariables`、`verbatimModuleSyntax`、
