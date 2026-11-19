@@ -32,7 +32,9 @@ on:
 
 # Cancel superseded runs on the same ref.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  # The weekly schedule and a push to main share the ref, so the event name
+  # keeps one from cancelling the other.
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 # Least privilege by default. Jobs that upload artifacts re-grant `actions:
@@ -82,7 +84,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: pnpm audit
-        run: pnpm audit
+        run: pnpm run audit
 
   fallow:
     name: fallow
@@ -176,6 +178,8 @@ jobs:
         uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
+          # The changed-lines step diffs against the base branch.
+          fetch-depth: 0
       - name: Set up pnpm
         uses: pnpm/action-setup@v6.1.0
       - name: Set up Node
@@ -188,10 +192,34 @@ jobs:
       # Vitest needs .wxt/tsconfig.json (see the test job).
       - name: Prepare WXT
         run: pnpm exec wxt prepare
-      # Every mutant, not only the diff: this also catches a change that only
-      # weakens or removes tests.
-      - name: Mutation tests
-        run: pnpm mutation
+      # Mutation results are a metric, not a gate: neither step fails on
+      # undetected mutants. On a pull request, mutants on changed lines that no
+      # test detects (including code no test reaches) become warning
+      # annotations on the diff.
+      - name: Mutation tests (changed lines)
+        if: github.event_name == 'pull_request'
+        run: pnpm exec mutator --since "origin/${GITHUB_BASE_REF}"
+      # Editing these files can narrow what mutation testing checks without
+      # any failure, so a pull request that touches them gets a warning.
+      - name: Mutation settings changes
+        if: github.event_name == 'pull_request'
+        run: |
+          git diff --name-only "origin/${GITHUB_BASE_REF}...HEAD" -- 'mutator.config.*' mutator.accepted.json |
+            while read -r file; do
+              echo "::warning file=${file},title=ミューテーションテストの設定が変わった::${file}が変わりました。検査する範囲が狭まっていないか、動作の変わる壊し方を記録していないかを確かめてください。"
+            done
+      # Every mutant, for the overall score, written to the job summary. A
+      # change that only weakens or removes tests lowers this score.
+      # Annotations are left to the step above, so GITHUB_ACTIONS is cleared.
+      - name: Mutation tests (all)
+        run: |
+          GITHUB_ACTIONS='' pnpm mutation | tee "$RUNNER_TEMP/mutation.txt"
+          {
+            echo "### ミューテーションテスト（全件）"
+            echo '```text'
+            grep -E '^(mutants|Killed|score)' "$RUNNER_TEMP/mutation.txt" || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
   build:
     name: build

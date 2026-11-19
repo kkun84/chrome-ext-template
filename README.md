@@ -5,7 +5,7 @@ Windows + WSLで開発し、Windows側のChromeにunpacked拡張として読み�
 
 - **WXT 0.21.5** — ビルド / 開発サーバ / manifest生成
 - **Effect 4.1.2** — ドメインロジック・依存注入（Functional Core / Imperative Shell）
-- **TypeScript 7.0.2** — Goネイティブの`tsc`（型チェック専用。TS JS APIは不要）
+- **TypeScript 7.0.2** — Goネイティブの`tsc`（型チェック専用。ビルドと検査はTS JS APIを使わない。mutatorだけが型エラーになるミュータントの判定に`typescript/unstable/sync`を使う）
 - **Vitest 5** — `src/core`の純関数ユニットテスト（カバレッジは`@vitest/coverage-v8`）
 - **Playwright 1.59.1** — ビルド済み拡張のE2E（nixpkgs `playwright-driver`と一致させるため固定）
 - **mutator 0.2.0** — ミューテーションテスト（CIは全件、`pnpm check`は差分だけ実行）
@@ -14,7 +14,7 @@ Windows + WSLで開発し、Windows側のChromeにunpacked拡張として読み�
 - **fallow 3.42.0** — デッドコード / 循環依存 / 重複 / ヘルススコア / アーキテクチャ境界の解析
 - **lefthook 2.2.1** — Gitフック（pre-commit / pre-push）
 - **Nix flake** — Node 24 / pnpm / Playwright Chromium / shellcheck / actionlintを固定
-- **GitHub Actions CI** — lint / fallow / typecheck / test / build / e2e / nix / verify-lockfile / CodeQL / dependency-review
+- **GitHub Actions CI** — lint / fallow / typecheck / test / mutation / build / e2e / nix / verify-lockfile / CodeQL / dependency-review
 
 ---
 
@@ -138,7 +138,7 @@ Nix外でローカル検証する場合のみ`CHROME_PATH=/usr/bin/google-chrome
 
 `typescript@7.0.2`（Goネイティブコンパイラ）を使用しています。
 
-- TS 7は **型チェック専用** で、プログラム用JS APIを提供しません（JS APIは7.1で予定、現在betaのため未使用）。
+- TS 7は **型チェック専用** で、プログラム用JS APIを提供しません（JS APIは7.1で予定、現在betaのため未使用）。例外はmutatorで、型エラーになるミュータントの判定に`typescript/unstable/sync`を使います。
 - WXT 0.21.5は`typescript`をpeerとして要求しますが、そのJSは`typescript`を`import`しません（`wxt prepare`は型/tsconfigを生成するだけ）。Vite 8はOxc/rolldownでトランスパイルするためTS APIも不要です。
 - `vite@8.3.5`はWXTの必須peerのため、直接devDependencyとして追加しています（推移的にも解決済み）。
 - `tsconfig.json`は`baseUrl`を設定しません（WXT生成の`.wxt/tsconfig.json`が`paths`を持ちます）。TS 7はCSSの副作用importに厳しいため、`types`に`vite/client`を追加しています。
@@ -152,8 +152,8 @@ Nix外でローカル検証する場合のみ`CHROME_PATH=/usr/bin/google-chrome
 | ジョブ               | 内容                                                                 |
 | -------------------- | -------------------------------------------------------------------- |
 | `lint`               | `pnpm lint`（`biome ci` + `rumdl check` + ja-space + pnpm-policy + no-suppress）。続けて`pnpm dedupe:check`を実行 |
-| `audit (weekly)`     | `pnpm audit`。週1回の定期実行のときだけ動く（PRでは動かない） |
-| `mutation`           | `pnpm mutation`（ミューテーションテストの全件。生き残りかテストの届かないミュータントがあれば失敗） |
+| `audit (weekly)`     | `pnpm run audit`。週1回の定期実行のときだけ動く（PRでは動かない） |
+| `mutation`           | ミューテーションテスト。PRでは変更した行の検出漏れを警告として表示し、続けて全件のスコアをジョブの概要（Summary）に出す。失敗にはしない |
 | `fallow`             | `pnpm fallow`（デッドコード / 循環依存 / 重複 / ヘルス / 境界）。PRでは`fallow audit --gate new-only`も実行 |
 | `typecheck`          | `pnpm typecheck`（`wxt prepare && tsc --noEmit`）                    |
 | `test`               | `pnpm test:coverage` → カバレッジartifact `coverage`                |
@@ -240,7 +240,7 @@ pnpm fallow:audit    # origin/main 基準の差分監査（新規の問題のみ
   `globalThis.chrome`の呼び出しも禁止します。
 - `entry`は指定しません。WXTプラグインがエントリポイントを自動検出します。
 - `ignoreExports`で、`src/services/messages.ts`の4つのexportを`duplicate-exports`の対象から
-  外しています。entrypointsが`src/core`を直接importしないよう、`src/core/messages.ts`と同じ名前で
+  外しています。この設定は未使用exportの検出からも外すので、この4つは使われなくなっても検出されません。entrypointsが`src/core`を直接importしないよう、`src/core/messages.ts`と同じ名前で
   再エクスポートしているためです。
 
 ## mutator（ミューテーションテスト）
@@ -253,17 +253,21 @@ pnpm mutation       # 全件を実行。レポートは .mutator/report/index.ht
 pnpm mutation:diff  # origin/main との差分にあるミュータントだけ実行
 ```
 
-どちらも、テストが検出できないミュータント（生き残り）と、どのテストも届かないミュータントが
-1つでもあれば失敗します。
+結果は、テストを見直すための指標です。検出できないミュータント（生き残りと、どのテストも届かないもの）が
+あっても失敗にはしません。テストが元々落ちている場合だけ失敗します。
 
 - **手元**: `pnpm check`の最後で`pnpm mutation:diff`を実行します。差分にミュータントが無ければ、
   テストを1回流すだけで終わります。`origin/main`が無い環境（`.git`の無い展開先や浅いclone）では、
   その旨を表示して何もしません。
-- **CI**: `mutation`ジョブが`pnpm mutation`で全件を実行します。テストを弱めたり消したりしただけの
-  変更は差分実行では検出できないので、CIは全件にしています。
+- **CI**: `mutation`ジョブが、PRでは変更した行のミュータントを実行し、検出できなかったもの
+  （どのテストも届かないものを含む）をPRの差分に警告として表示します。続けて`pnpm mutation`で
+  全件を実行し、全体のスコアを出します。テストを弱めたり消したりしただけの変更は、全件の結果に
+  現れます。
 - `pnpm mutation` / `pnpm mutation:diff`を単独で実行する前に、`pnpm typecheck`（または
   `pnpm exec wxt prepare`）で`.wxt/`を作っておきます。`pnpm test`と同じ前提です。
-- 検出できなかったミュータントは、テストを足して落とします。
+- 検出できなかったミュータントは、テストが足りないのか、コードが要らないのかを考えます。
+  テストを足すときは、呼び出す側から見える振る舞いを確かめます。数字を満たすためだけのテストは
+  書きません。手順は`node_modules/@mizchi/mutator/skills/mutation-test-loop/SKILL.md`にあります。
 - どんな入力でも振る舞いが変わらない等価ミュータントだけを、理由を付けて
   `mutator.accepted.json`に記録します。キーは`pnpm exec mutator --reporter agent`の出力の
   `gaps[].key`にあります。
@@ -381,7 +385,7 @@ Markdownは[rumdl](https://github.com/rvben/rumdl) 0.3.2で検査します（`pn
 | `pnpm lint:md`    | `rumdl check .`（Markdownのlint）|
 | `pnpm lint:ja-space` | 日本語と英数字の間の半角スペースを検査 |
 | `pnpm lint:pnpm-policy` | pnpmの供給網ポリシー（除外キー / 必須設定 / 禁止CLIオプション）を検査 |
-| `pnpm lint:no-suppress` | 抑制コメント（`biome-ignore` / `@ts-*` / `eslint-disable` / `fallow-ignore`）を検査 |
+| `pnpm lint:no-suppress` | 抑制コメント（`biome-ignore` / `@ts-*` / `eslint-disable` / `fallow-ignore` / `mutator-disable` / `Stryker disable`）を検査 |
 | `pnpm lint:fix`   | Biome + rumdl + 日本語タイポグラフィを自動修正 |
 | `pnpm fix`        | `lint:fix`の別名 |
 | `pnpm test`       | Vitestユニットテスト              |
@@ -390,13 +394,13 @@ Markdownは[rumdl](https://github.com/rvben/rumdl) 0.3.2で検査します（`pn
 | `pnpm test:e2e`   | ビルド + Playwright E2E            |
 | `pnpm fallow`     | fallowでデッドコード / 循環依存 / 重複 / ヘルス / 境界を解析 |
 | `pnpm fallow:audit` | `origin/main`を基準にしたfallow監査（新規のみ） |
-| `pnpm mutation`   | ミューテーションテスト（`src/core` / `src/services`の全件。検出できないミュータントがあると失敗） |
-| `pnpm mutation:diff` | `origin/main`との差分にあるミュータントだけ実行。検出できないミュータントがあると失敗 |
+| `pnpm mutation`   | ミューテーションテスト（`src/core` / `src/services`の全件。結果を表示するだけ） |
+| `pnpm mutation:diff` | `origin/main`との差分にあるミュータントだけ実行。結果を表示するだけ |
 | `pnpm check`      | `lint` + `typecheck` + `test` + `fallow` + `mutation:diff` |
 | `pnpm check:all`  | `check` + `test:coverage` + `build` + `test:e2e` + `dedupe:check` |
 | `pnpm clean`      | 生成物（`.output` / `.wxt` / `coverage`等）を削除 |
 | `pnpm dedupe:check` | `pnpm dedupe --check`            |
-| `pnpm audit`      | `pnpm audit --audit-level moderate`（CIでは週1回の定期実行）|
+| `pnpm run audit`  | `pnpm audit --audit-level moderate`（CIでは週1回の定期実行）。`pnpm audit`と書くとpnpm本体のコマンドが優先され、しきい値が付かない |
 | `pnpm settings:check` | GitHub設定のドリフトを検出（読み取り専用）|
 | `pnpm settings:apply` | GitHub設定を適用               |
 
