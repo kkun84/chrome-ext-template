@@ -11,6 +11,7 @@
       "!**/.output",
       "!**/.wxt",
       "!**/coverage",
+      "!**/.mutator",
       "!**/node_modules",
       "!**/*.md",
       "!**/pnpm-lock.yaml",

@@ -14,10 +14,12 @@ const TS_IGNORE = directive(2);
 const TS_NOCHECK = directive(3);
 const ESLINT = directive(4);
 const FALLOW = directive(5);
+const MUTATOR = directive(6);
+const STRYKER = directive(7);
 
 describe("suppressionDirectives", () => {
-  it("builds all six directives", () => {
-    expect(suppressionDirectives()).toHaveLength(6);
+  it("builds all eight directives", () => {
+    expect(suppressionDirectives()).toHaveLength(8);
     expect(BIOME).toBe("biome" + "-" + "ignore");
     expect(TS_EXPECT).toBe("@ts" + "-" + "expect" + "-" + "error");
   });
@@ -42,6 +44,10 @@ describe("findSuppressions in TypeScript", () => {
       `// ${TS_NOCHECK}\n`,
       `// ${ESLINT}-next-line\n`,
       `// ${FALLOW}-next-line\n`,
+      `// ${MUTATOR}-next-line: reason\n`,
+      `// ${MUTATOR}-line\n`,
+      `/* ${MUTATOR} */\n`,
+      `// ${STRYKER} next-line all\n`,
     ];
     for (const input of inputs) {
       expect(findSuppressions(input, ".ts")).toHaveLength(1);

@@ -20,6 +20,9 @@ coverage/
 # fallow cache
 .fallow/
 
+# mutator cache / reports
+.mutator/
+
 # rumdl cache
 .rumdl_cache/
 

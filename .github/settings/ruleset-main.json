@@ -45,7 +45,8 @@
           { "context": "Analyze (actions)" },
           { "context": "Analyze (javascript-typescript)" },
           { "context": "dependency-review" },
-          { "context": "fallow" }
+          { "context": "fallow" },
+          { "context": "mutation" }
         ]
       }
     }
