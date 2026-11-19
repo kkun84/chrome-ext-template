@@ -54,14 +54,14 @@ entrypoints  →  layers / services  →  core
 
 ## Definition of done
 
-- 作業を終える前に **`pnpm check`**（`lint` + `typecheck` + `test` + `fallow`）を
+- 作業を終える前に **`pnpm check`**（`lint` + `typecheck` + `test` + `fallow` + `mutation:diff`）を
   実行し、通ることを確認する。
 - リリース / CI相当のフル検証では **`pnpm check:all`**（`check` + `test:coverage` +
-  `build` + `test:e2e` + `dedupe:check` + `audit`）も実行する。
+  `build` + `test:e2e` + `dedupe:check`）も実行する。
 
 ## Machine-enforced rules
 
-規約は文章だけでなく、次のツールで機械的に強制されます（すべて`error`）。
+規約は文章だけでなく、次のツールで機械的に強制されます（mutatorを除き、すべて`error`）。
 
 - **Biome**（`biome.json`、`pnpm lint` = `biome ci .`）:
   format / recommended lint、`noExplicitAny`（`any`禁止）、`noImplicitAnyLet`、
@@ -87,13 +87,26 @@ entrypoints  →  layers / services  →  core
   オプションも検出する。`pnpm lint` / `pnpm check`の一部として実行される。
 - **no-suppress**（`scripts/lint-no-suppress.ts`、`pnpm lint:no-suppress`）:
   `biome-ignore` / `@ts-expect-error` / `@ts-ignore` / `@ts-nocheck` /
-  `eslint-disable` / `fallow-ignore`を**コメント**として書くことを禁止する（文字列や
+  `eslint-disable` / `fallow-ignore` / `mutator-disable` / `Stryker disable`を**コメント**として書くことを禁止する（文字列や
   Markdownの説明は対象外）。`pnpm lint` / `pnpm check`の一部として実行される。
 - **fallow**（`.fallowrc.json`、`pnpm fallow`）: デッドコード / 循環依存 / 重複 /
   ヘルスに加え、**architecture boundaries**（同じレイヤー方向。`entrypoints → layers /
   services → core`）と、coreゾーンでの禁止呼び出し（`Date.now`、`Math.random`、
   `chrome.*`、`browser.*`、`globalThis.chrome`）を検出する。`fallow audit`の
   `added-suppression`は`error`（新規の抑制コメントを拒否）。
+- **mutator**（`mutator.config.json`）: `src/core` / `src/services`のミュータントを実行し、
+  テストが検出できないミュータントを表示する。失敗にはしない。`pnpm check`は`pnpm mutation:diff`で
+  `origin/main`との差分だけを実行する。CIの`mutation`ジョブは、PRで変更した行の検出漏れを
+  警告として表示し、全件のスコアをジョブの概要に出す（テストを消しただけの変更はここで分かる）。
+  `src/core` / `src/services`を変えたら、`pnpm mutation:diff`の結果を見直す。検出できないミュータントは、
+  テストが足りないのか、コードが要らないのかを判断する。テストを足すときは、呼び出す側から見える
+  振る舞いを確かめる。ミュータントを落とすためだけに実装をなぞるテストは書かない。手順は
+  `node_modules/@mizchi/mutator/skills/mutation-test-loop/SKILL.md`に従う。
+  等価ミュータントだけを`pnpm exec mutator accept <key> --reason <理由>`で
+  `mutator.accepted.json`に記録する（キーは`pnpm exec mutator --reporter agent`の`gaps[].key`）。
+  テストを弱めた変更を通すために記録してはいけない。ミューテーションテストから外すものは、
+  コメントではなく`mutator.config.json`の`exclude`に書く。PRで`mutator.config.*` /
+  `mutator.accepted.json`を変えると、CIが警告を出す。
 - **TypeScript**（`tsconfig.json`）: `strict`、`noUncheckedIndexedAccess`、
   `exactOptionalPropertyTypes`、`noImplicitOverride`、`noPropertyAccessFromIndexSignature`、
   `noFallthroughCasesInSwitch`、`useUnknownInCatchVariables`、`verbatimModuleSyntax`、
@@ -104,8 +117,8 @@ entrypoints  →  layers / services  →  core
   日本語タイポグラフィの`--fix`、pre-pushは`pnpm check`。globは再帰形（`**/*.{...}`）で
   サブディレクトリのファイルも対象にする。
 - **CI**（`.github/workflows/ci.yml`）: `pnpm lint`（`biome ci`）、fallow、typecheck、
-  tests + coverage、build、e2e、nix flake check + shellcheck/actionlint、
-  `pnpm dedupe --check`、`pnpm audit`。
+  tests + coverage、mutation（全件。結果の表示だけ）、build、e2e、nix flake check + shellcheck/actionlint、
+  `pnpm dedupe --check`。`pnpm audit`は週1回の定期実行だけで動く。
 
 ## よく使うコマンド
 
@@ -126,11 +139,13 @@ pnpm test:coverage # Vitest + カバレッジ
 pnpm test:e2e      # ビルド + Playwright
 pnpm fallow        # fallow（デッドコード / 循環依存 / 重複 / ヘルス / 境界）
 pnpm fallow:audit  # origin/main 基準の差分監査（新規のみ）
-pnpm check         # lint + typecheck + test + fallow
-pnpm check:all     # check + coverage + build + e2e + dedupe + audit
+pnpm mutation      # ミューテーションテスト（全件。レポートは .mutator/report）
+pnpm mutation:diff # origin/main との差分だけ実行
+pnpm check         # lint + typecheck + test + fallow + mutation:diff
+pnpm check:all     # check + coverage + build + e2e + dedupe
 pnpm clean         # 生成物（.output / .wxt / coverage 等）を削除
 pnpm dedupe:check  # pnpm dedupe --check
-pnpm audit         # pnpm audit（moderate 以上）
+pnpm run audit     # pnpm audit --audit-level moderate（CI では週1回）
 pnpm settings:check # GitHub 設定のドリフト検出
 pnpm settings:apply # GitHub 設定を適用
 ```
@@ -141,14 +156,14 @@ pnpm settings:apply # GitHub 設定を適用
   インストールします。フックをスキップするには`LEFTHOOK=0`を設定します。
 - `pre-commit`はstagedの対象ファイルに`biome check --write`と`rumdl check`（`*.md`）、
   日本語タイポグラフィの`--fix`（`*.{md,ts,tsx,js,yml,yaml,sh,html}`）を実行し、`pre-push`は
-  `pnpm check`（lint + typecheck + test + fallow）を実行します。
-- `fallow`は`3.38.1`に固定（7日ポリシー）。`>=3.42.0`へは2026-11-17 16:28 JST以降に上げる。
+  `pnpm check`（lint + typecheck + test + fallow + mutation:diff）を実行します。
 
 ## CI（GitHub Actions）
 
 `.github/workflows/ci.yml`が`push` / `pull_request`で`lint` / `fallow` /
-`typecheck` / `test`（カバレッジ）/ `build` / `e2e` / `nix`を実行します。`lint`ジョブは
-`pnpm lint`（`biome ci`）に加えて`pnpm dedupe:check`と`pnpm audit`を実行し、
+`typecheck` / `test`（カバレッジ）/ `mutation` / `build` / `e2e` / `nix`を実行します。`lint`ジョブは
+`pnpm lint`（`biome ci`）に加えて`pnpm dedupe:check`を実行し、`pnpm audit`は週1回の定期実行の
+`audit`ジョブだけが実行します（PRで増える依存は`dependency-review`が検査します）。
 `nix`ジョブは`nix flake check`とdevShellのrealizeの後に
 `shellcheck scripts/*.sh && actionlint`を実行します。artifact
 （カバレッジ・拡張のunpacked/zip・失敗時のPlaywright trace/screenshot）は
@@ -167,7 +182,7 @@ Actions実行ページのArtifactsから取得できます。
   `@playwright/test`はnixpkgs `playwright-driver`（1.59.1）と整合が必要なため
   自動更新から除外しています。nixエコシステムはコミット済みの`flake.lock`を
   更新対象にします。
-- **TypeScript 7**（`tsc`のみ、JS API不使用）。Vite 8 / WXTはTS APIを必要と
+- **TypeScript 7**（`tsc`のみ。JS APIはmutatorの型判定だけが使う）。Vite 8 / WXTはTS APIを必要と
   しません。`vite@8.3.5`はWXTの必須peerとして直接devDependencyに追加。
 - **サプライチェーン**: pnpmは`minimumReleaseAge: 10080` / installスクリプト
   ブロック（`onlyBuiltDependencies`）/ `trustPolicy: no-downgrade` /

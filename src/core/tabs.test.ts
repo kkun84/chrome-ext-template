@@ -76,6 +76,43 @@ describe("selectPersistableUrl", () => {
     ).toBeUndefined();
   });
 
+  it("prefers the active tab over an earlier tab in the last-focused window", () => {
+    expect(
+      selectPersistableUrl(
+        [
+          tab({ url: "https://focused.example/", lastFocusedWindow: true }),
+          tab({ url: "https://active.example/", active: true, windowId: 2 }),
+        ],
+        isPersistable,
+      ),
+    ).toBe("https://active.example/");
+  });
+
+  it("skips non-persistable tabs in the last-focused window", () => {
+    expect(
+      selectPersistableUrl(
+        [
+          tab({ url: "https://other.example/", windowId: 2 }),
+          tab({ url: "chrome://extensions", lastFocusedWindow: true }),
+          tab({ url: "https://focused.example/", lastFocusedWindow: true }),
+        ],
+        isPersistable,
+      ),
+    ).toBe("https://focused.example/");
+  });
+
+  it("falls back to any persistable tab, skipping non-persistable ones", () => {
+    expect(
+      selectPersistableUrl(
+        [
+          tab({ url: "chrome://extensions" }),
+          tab({ url: "https://other.example/", windowId: 2 }),
+        ],
+        isPersistable,
+      ),
+    ).toBe("https://other.example/");
+  });
+
   it("returns undefined for an empty list", () => {
     expect(selectPersistableUrl([], isPersistable)).toBeUndefined();
   });

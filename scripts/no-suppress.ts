@@ -35,6 +35,8 @@ export const suppressionDirectives = (): readonly string[] => [
   `@ts${"-"}nocheck`,
   `eslint${"-"}disable`,
   `fallow${"-"}ignore`,
+  `mutator${"-"}disable`,
+  `Stryker${" "}disable`,
 ];
 
 /** Extensions that may contain comments we scan for directives. */
