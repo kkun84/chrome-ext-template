@@ -204,6 +204,13 @@ jobs:
       - name: Tests weakened by the change
         if: github.event_name == 'pull_request'
         run: bash scripts/mutation-diff.sh --kill-matrix "origin/${GITHUB_BASE_REF}"
+      # On a copy of this checkout in a temporary repository, a branch with no
+      # change must pass and one that deletes a test must fail. A mutator
+      # update (e.g. from Dependabot) that quietly breaks the review fails
+      # here. It runs on every event, like the step below.
+      - name: Mutation guard
+        if: ${{ !cancelled() && steps.prepare.conclusion == 'success' }}
+        run: pnpm test:mutation-guard
       # Every mutant of this commit, for the overall score, written to the job
       # summary. It starts from an empty .mutator so the score does not reuse
       # the baseline, and it also runs when the step above failed. Annotations
@@ -211,6 +218,7 @@ jobs:
       - name: Mutation tests (all)
         if: ${{ !cancelled() && steps.prepare.conclusion == 'success' }}
         run: |
+          set -o pipefail
           rm -rf .mutator
           GITHUB_ACTIONS='' pnpm mutation | tee "$RUNNER_TEMP/mutation.txt"
           {

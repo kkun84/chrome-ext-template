@@ -27,6 +27,7 @@
     "fallow": "fallow dead-code && fallow architecture && fallow dupes && fallow health --score --complexity",
     "mutation": "mutator",
     "mutation:diff": "bash scripts/mutation-diff.sh --kill-matrix --skip-without-base origin/main",
+    "test:mutation-guard": "bash scripts/mutation-guard.sh",
     "mutation:findings": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/check-mutation-findings.ts",
     "fallow:audit": "fallow audit --base origin/main",
     "settings:check": "bash scripts/github-settings.sh --check",

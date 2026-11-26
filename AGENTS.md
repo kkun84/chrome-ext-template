@@ -99,9 +99,10 @@ entrypoints  →  layers / services  →  core
   検出していたのに、今はどのテストも検出しない場合を指す（mutatorの`detectionRegression`）。
   `scripts/mutation-diff.sh`（`pnpm mutation:diff`）が、`git merge-base <base> HEAD`を一時的なworktreeに
   取り出し、今の作業ツリーの環境ファイル（`package.json`、`pnpm-lock.yaml`、`pnpm-workspace.yaml`、
-  `.npmrc`、`tsconfig*.json`、`vitest.config.*`、`mutator.config.*`と、`scripts/vitest-config-files.ts`が
+  `.npmrc`、`tsconfig*.json`、`vitest.config.*`、`mutator.config.*`と、`scripts/mutation-scope.ts`が
   Vitestの設定から解決する設定ファイル・`setupFiles`・`globalSetup`）を上書きして全件を実行し、
-  その結果を基準にする。前回の`.mutator`は使わない。続けて差分と変更したテストの分を
+  その結果を基準にする。基準の元の設定で集めていたテストファイルやmutatorの対象が、今も残っているのに
+  今の設定で外れていれば失敗にする（改名はgitの対応付けで追う）。前回の`.mutator`は使わない。続けて差分と変更したテストの分を
   `--include-test-changes --kill-matrix`付きで実行し、`scripts/mutation-findings.ts`（純関数）と
   `scripts/check-mutation-findings.ts`（`pnpm mutation:findings`）が判定する。基準と比べられなかった
   レポート（`comparison: "unavailable"`）や、形の違うレポート、基準を作れない時（worktreeの準備や
@@ -120,7 +121,12 @@ entrypoints  →  layers / services  →  core
   `mutator.accepted.json`に記録する（キーは`pnpm exec mutator --reporter agent`の`gaps[].key`）。
   テストを弱めた変更を通すために記録してはいけない。ミューテーションテストから外すものは、
   コメントではなく`mutator.config.json`の`exclude`に書く。PRで`mutator.config.*` /
-  `mutator.accepted.json`を変えると、CIが警告を出す。
+  `mutator.accepted.json`、`vitest.config.*`、`setupFiles` / `globalSetup`を変えると警告を出す。
+  これらと判定のスクリプト、`package.json`の`scripts`の変更は人が確かめる。mutatorを上げたら
+  `pnpm test:mutation-guard`（CIの`mutation`ジョブが毎回実行）で、判定が外れていないかを確かめる。
+  関数の書き換えと同時にテストを消すと警告だけになること、破壊的な依存の更新とテストの直しを同じPRに
+  入れると必ず失敗すること（直しを先に`main`へ入れる）、テストが読むデータの変更は検出しないことは、
+  READMEの「機械では確かめられないもの」を参照。
 - **TypeScript**（`tsconfig.json`）: `strict`、`noUncheckedIndexedAccess`、
   `exactOptionalPropertyTypes`、`noImplicitOverride`、`noPropertyAccessFromIndexSignature`、
   `noFallthroughCasesInSwitch`、`useUnknownInCatchVariables`、`verbatimModuleSyntax`、
@@ -156,6 +162,7 @@ pnpm fallow        # fallow（デッドコード / 循環依存 / 重複 / ヘ�
 pnpm fallow:audit  # origin/main 基準の差分監査（新規のみ）
 pnpm mutation      # ミューテーションテスト（全件。レポートは .mutator/report）
 pnpm mutation:diff # origin/main との共通の祖先で基準を作り、差分と変更したテストの分を実行して、テストを弱めた変更なら失敗
+pnpm test:mutation-guard # 一時的なリポジトリで、テストを消すとmutation:diffが失敗することを確かめる
 pnpm mutation:findings # 直前の結果からテストを弱めた変更を判定（基準のrefを渡すと設定の変更も警告）
 pnpm check         # lint + typecheck + test + fallow + mutation:diff
 pnpm check:all     # check + coverage + build + e2e + dedupe

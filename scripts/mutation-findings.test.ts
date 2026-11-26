@@ -233,12 +233,26 @@ describe("reviewSettingChanges", () => {
         "mutator.accepted.json",
         "mutator.config.ts",
         "docs/mutator.config.json",
-        "vitest.config.ts",
+        "docs/vitest.config.ts",
       ]),
     ).toEqual(
       ["mutator.config.json", "mutator.accepted.json", "mutator.config.ts"].map(
         (file) =>
           `::warning file=${file},title=ミューテーションテストの設定が変わった::${file}が変わりました。検査する範囲が狭まっていないか、動作の変わるミュータントを記録していないかを確かめてください。`,
+      ),
+    );
+  });
+
+  it("warns about the Vitest config and the setup files it names", () => {
+    expect(
+      reviewSettingChanges(
+        ["vitest.config.ts", "test/setup.ts", "test/other.ts"],
+        ["vitest.config.ts", "test/setup.ts"],
+      ),
+    ).toEqual(
+      ["vitest.config.ts", "test/setup.ts"].map(
+        (file) =>
+          `::warning file=${file},title=テストの設定や準備ファイルが変わった::${file}が変わりました。テストの設定や準備ファイルは、アサーションを無力化するなど、ミューテーションテストでは見つからない形でテストを弱められます。人が確かめてください。`,
       ),
     );
   });

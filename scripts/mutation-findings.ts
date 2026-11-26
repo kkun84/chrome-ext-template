@@ -309,23 +309,48 @@ const isMutationSetting = (file: string): boolean =>
   file === "mutator.accepted.json" ||
   (file.startsWith("mutator.config.") && !file.includes("/"));
 
+/** True for `vitest.config.*` at the root. */
+const isVitestConfig = (file: string): boolean =>
+  file.startsWith("vitest.config.") && !file.includes("/");
+
 /**
  * Warn about changed files that decide what mutation testing checks.
  *
- * Editing them can narrow the check or record a mutant that changes behaviour
- * as equivalent, and no test fails because of it.
+ * Editing mutator's settings can narrow the check or record a mutant that
+ * changes behaviour as equivalent. Editing the Vitest config or a setup file
+ * (`testSetupFiles`, the resolved `setupFiles` / `globalSetup`) can make
+ * every assertion pass. No test fails because of either, so a person has to
+ * look.
  */
 export const reviewSettingChanges = (
   changedFiles: readonly string[],
-): readonly string[] =>
-  changedFiles.filter(isMutationSetting).map((file) =>
-    formatAnnotation({
-      level: "warning",
-      title: "ミューテーションテストの設定が変わった",
-      file,
-      message: `${file}が変わりました。検査する範囲が狭まっていないか、動作の変わるミュータントを記録していないかを確かめてください。`,
-    }),
-  );
+  testSetupFiles: readonly string[] = [],
+): readonly string[] => {
+  const setup = new Set(testSetupFiles);
+  return changedFiles.flatMap((file) => {
+    if (isMutationSetting(file)) {
+      return [
+        formatAnnotation({
+          level: "warning",
+          title: "ミューテーションテストの設定が変わった",
+          file,
+          message: `${file}が変わりました。検査する範囲が狭まっていないか、動作の変わるミュータントを記録していないかを確かめてください。`,
+        }),
+      ];
+    }
+    if (isVitestConfig(file) || setup.has(file)) {
+      return [
+        formatAnnotation({
+          level: "warning",
+          title: "テストの設定や準備ファイルが変わった",
+          file,
+          message: `${file}が変わりました。テストの設定や準備ファイルは、アサーションを無力化するなど、ミューテーションテストでは見つからない形でテストを弱められます。人が確かめてください。`,
+        }),
+      ];
+    }
+    return [];
+  });
+};
 
 /**
  * Review the findings of a report.

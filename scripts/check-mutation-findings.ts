@@ -4,14 +4,15 @@
  *
  * Usage:
  *   node --experimental-strip-types --disable-warning=ExperimentalWarning \
- *     scripts/check-mutation-findings.ts [base-ref]
+ *     scripts/check-mutation-findings.ts [base-ref] [--watch <file>]...
  *
  * Reads `.mutator/report/mutation.json` from the last mutator run and prints
  * GitHub Actions annotations: an error for each mutant the tests detected
  * before and no longer detect, a warning for each new test that detects
  * nothing and for each mutant no test detects. With a base ref (e.g.
  * `origin/main`) it also warns about changed `mutator.config.*` /
- * `mutator.accepted.json` since that ref. Exits 1 when the tests got weaker,
+ * `mutator.accepted.json`, `vitest.config.*` and each `--watch` file (the
+ * Vitest setup files) since that ref. Exits 1 when the tests got weaker,
  * when mutator had no baseline to compare with, or when the report or the ref
  * cannot be read. `scripts/mutation-diff.sh` makes the baseline and runs this.
  */
@@ -96,7 +97,12 @@ export const run = (
   args: readonly string[],
   root: string = REPO_ROOT,
 ): { output: string; exitCode: number } => {
-  const base = args[0];
+  const watched = args.flatMap((arg, index) =>
+    args[index - 1] === "--watch" ? [arg] : [],
+  );
+  const base = args.find(
+    (arg, index) => !arg.startsWith("--") && args[index - 1] !== "--watch",
+  );
   const changed = base === undefined ? { files: [] } : changedFiles(root, base);
   const review =
     "problem" in changed
@@ -106,7 +112,7 @@ export const run = (
         )
       : reviewReport(root);
   const settings =
-    "problem" in changed ? [] : reviewSettingChanges(changed.files);
+    "problem" in changed ? [] : reviewSettingChanges(changed.files, watched);
   return {
     output: `${[...settings, ...review.lines].join("\n")}\n`,
     exitCode: review.exitCode,

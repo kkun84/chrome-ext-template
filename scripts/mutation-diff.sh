@@ -13,16 +13,21 @@
 #    lockfiles, tsconfig.json, pnpm-workspace.yaml and each Vitest project's
 #    config file, setupFiles and globalSetup (node_modules/@mizchi/mutator/
 #    src/reuse.ts and the Vitest session's configFiles). The Vitest files are
-#    resolved from the config by scripts/vitest-config-files.ts. Copying them
+#    resolved from the config by scripts/mutation-scope.ts. Copying them
 #    makes the baseline's hash equal this checkout's, so a change to them
 #    cannot turn the comparison off.
 # 3. Install offline, prepare WXT and run every mutant there.
-# 4. Replace this checkout's .mutator with the baseline's snapshots, run the
+# 4. With the base's own Vitest and mutator settings, list the test files
+#    Vitest collected and the files mutator mutated at the base. Fail when one
+#    still exists (under its new name after a rename) but the current
+#    settings leave it out: narrowing include / exclude drops it from the
+#    baseline and the change alike, so nothing would look weaker.
+# 5. Replace this checkout's .mutator with the baseline's snapshots, run the
 #    mutants of the diff and of the changed tests, and review the report with
 #    scripts/check-mutation-findings.ts.
 #
 # Exit codes: 0 when the tests kept their strength. 1 when the tests got
-# weaker, when no baseline could be made (e.g. the base's tests fail with this
+# weaker or left out, when no baseline could be made (e.g. the base's tests fail with this
 # checkout's dependencies), when mutator could not use the baseline it was
 # given, or when the run itself failed. A missing baseline fails because
 # letting it pass would let a change that breaks the base's tests (a new
@@ -109,16 +114,27 @@ if ! git worktree add --detach --quiet "$tree" "$merge_base" >>"$work/baseline.l
   no_baseline "worktreeを作れません"
 fi
 
-# The files in mutator's environment hash, plus .npmrc, which decides how the
-# baseline installs. Vitest's own files (config, setupFiles, globalSetup) come
-# from the resolved config, so a setup file added by this change reaches the
-# baseline too.
-if ! vitest_files=$(node --experimental-strip-types --disable-warning=ExperimentalWarning \
-  scripts/vitest-config-files.ts 2>"$work/vitest-files.log"); then
-  echo "::error title=Vitestの設定を読めない::$(escape_data "scripts/vitest-config-files.tsが失敗しました: $(tail -n 5 "$work/vitest-files.log")")"
+# Vitest's files (config, setupFiles, globalSetup), the test files it
+# collects and the files mutator mutates, with this checkout's settings.
+scope() {
+  node --experimental-strip-types --disable-warning=ExperimentalWarning \
+    "$root/scripts/mutation-scope.ts" "$@"
+}
+if ! scope list --root "$root" >"$work/current.json" 2>"$work/scope.log"; then
+  echo "::error title=テストの設定を読めない::$(escape_data "scripts/mutation-scope.tsが失敗しました: $(tail -n 5 "$work/scope.log")")"
   exit 1
 fi
+mapfile -t vitest_files < <(node -e 'for (const f of JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")).configFiles) console.log(f)' "$work/current.json")
+
+# The base's own settings, kept to list what the base collected (step 4).
+mkdir -p "$work/base-config"
 shopt -s nullglob
+for file in "$tree"/vitest.config.* "$tree"/mutator.config.*; do
+  cp "$file" "$work/base-config/"
+done
+
+# The files in mutator's environment hash, plus .npmrc, which decides how the
+# baseline installs.
 for file in "$tree"/package.json "$tree"/pnpm-lock.yaml "$tree"/pnpm-workspace.yaml \
   "$tree"/.npmrc "$tree"/tsconfig*.json "$tree"/vitest.config.* "$tree"/mutator.config.*; do
   rm -f "$file"
@@ -128,14 +144,12 @@ for file in package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc \
   if [ -f "$file" ]; then cp "$file" "$tree/$file"; fi
 done
 shopt -u nullglob
-while IFS= read -r file; do
-  if [ -n "$file" ]; then
-    mkdir -p "$tree/$(dirname "$file")"
-    cp "$file" "$tree/$file"
-  fi
-done <<<"$vitest_files"
+for file in "${vitest_files[@]}"; do
+  mkdir -p "$tree/$(dirname "$file")"
+  cp "$file" "$tree/$file"
+done
 echo "mutation:diff: copied" package.json pnpm-lock.yaml pnpm-workspace.yaml \
-  .npmrc 'tsconfig*.json' 'vitest.config.*' 'mutator.config.*' "${vitest_files//$'\n'/ }"
+  .npmrc 'tsconfig*.json' 'vitest.config.*' 'mutator.config.*' "${vitest_files[@]}"
 
 # --ignore-scripts keeps `prepare` (lefthook install) from rewriting this
 # checkout's .git/hooks, which the worktree shares.
@@ -153,6 +167,34 @@ if ! (cd "$tree" && GITHUB_ACTIONS='' pnpm exec mutator --reporter json) >>"$wor
 fi
 echo "mutation:diff: baseline made in $(($(date +%s) - started))s"
 
+# What the base collected with its own settings. The saved config files go
+# back into the worktree under other names, so their imports still resolve
+# from there; without one, Vitest runs without a config and mutator with its
+# defaults.
+base_vitest=none
+base_mutator=none
+shopt -s nullglob
+for file in "$work"/base-config/vitest.config.*; do
+  base_vitest="$tree/.mutation-base-vitest.${file##*/vitest.}"
+  cp "$file" "$base_vitest"
+  break
+done
+for file in "$work"/base-config/mutator.config.*; do
+  base_mutator="$tree/.mutation-base-mutator.${file##*/mutator.}"
+  cp "$file" "$base_mutator"
+  break
+done
+if [ "$base_vitest" = none ]; then
+  for file in "$tree"/vite.config.*; do base_vitest=$file; break; done
+fi
+shopt -u nullglob
+if ! scope list --root "$tree" --vitest-config "$base_vitest" --mutator-config "$base_mutator" \
+  >"$work/base.json" 2>>"$work/baseline.log"; then
+  no_baseline "基準の設定で、テストファイルとミューテーションテストの対象を一覧にできません"
+fi
+scope_status=0
+scope compare "$work/base.json" "$work/current.json" "$merge_base" || scope_status=$?
+
 # Only the snapshots: scopes/*.json and snapshot.json. Reports, the resume
 # checkpoints and the old .mutator of this checkout are dropped.
 rm -rf .mutator
@@ -164,8 +206,11 @@ if ! GITHUB_ACTIONS='' pnpm exec mutator --since "$merge_base" --include-test-ch
   echo "::error title=ミューテーションテストが失敗した::mutator --since ${merge_base}が失敗しました。上の出力を確かめてください。"
   exit 1
 fi
+watch_args=()
+for file in "${vitest_files[@]}"; do watch_args+=(--watch "$file"); done
 status=0
 node --experimental-strip-types --disable-warning=ExperimentalWarning \
-  scripts/check-mutation-findings.ts "$merge_base" || status=$?
+  scripts/check-mutation-findings.ts "$merge_base" "${watch_args[@]}" || status=$?
 echo "mutation:diff: done in $(($(date +%s) - started))s"
+if [ "$scope_status" -ne 0 ]; then exit 1; fi
 exit "$status"
