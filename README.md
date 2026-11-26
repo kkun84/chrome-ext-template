@@ -289,6 +289,12 @@ pnpm mutation:findings # 直前の結果（.mutator/report/mutation.json）か�
    変わった、またはテストを消した時に限って失敗にする。mutatorは基準が`Killed`の時だけ比べるので、マシンの
    負荷が高く基準で`Timeout`になると見逃すため。`Timeout`には検出したテストが記録されず、負荷で検出しない
    ミュータントが`Timeout`になることもあるので、変更で説明できる時だけに絞っている。
+   さらに、基準で`Killed`になり、その時の検出したテストに変えたか消したテストと変わっていないテストの
+   両方を含み、関数の中身が変わっておらず、今も検出したことになっているミュータントは、前の結果を
+   使わずに`mutator --only`で2回実行し直し、どちらかで検出されなければ失敗にする
+   （`scripts/mutation-recheck.ts`）。mutatorは、前に検出したテストのどれかが変わっていなければ前の
+   `Killed`を使い回す。負荷で関係の無いテストがたまたま落ちて検出したテストに数えられると、本当に検出して
+   いたテストを弱めても見逃すため。
 
 - 基準を作れない時（worktreeの準備や依存の導入に失敗した、ベースのテストが今の環境で落ちる、など）も
   失敗にします。通すと、ベースのテストを動かなくする変更とテストを消す変更を同時に入れた時に見逃すため
@@ -352,7 +358,7 @@ mutator自体が変わって判定が黙って外れていないかは、`pnpm t
 
 1. `package.json`の`mutation` / `mutation:diff` / `mutation:findings` / `test:mutation-guard`スクリプト、`check`の
    `&& pnpm mutation:diff`、`clean`の`.mutator`
-2. `scripts/mutation-diff.sh`、`scripts/mutation-guard.sh`、`scripts/mutation-scope.ts`とそのテスト、`scripts/mutation-findings.ts` / `scripts/check-mutation-findings.ts`とそのテスト、
+2. `scripts/mutation-diff.sh`、`scripts/mutation-guard.sh`、`scripts/mutation-scope.ts`とそのテスト、`scripts/mutation-recheck.ts`、`scripts/mutation-findings.ts` / `scripts/check-mutation-findings.ts`とそのテスト、
    `scripts/fixtures/mutator-*.json`
 3. `mutator.config.json`と`mutator.accepted.json`
 4. devDependencyの`@mizchi/mutator`（`pnpm remove @mizchi/mutator`）

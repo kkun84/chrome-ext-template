@@ -449,6 +449,112 @@ export const crossCheckRegressions = (
   });
 
 /**
+ * The scope hash of each mutant in a mutator snapshot (format 2: rows of
+ * `[key, file, scope, scopeHash, status, ...]`, node_modules/@mizchi/mutator/
+ * src/snapshot.ts). An unknown format yields an empty map, so nothing is
+ * taken as unchanged.
+ */
+export const scopeHashes = (snapshot: unknown): ReadonlyMap<string, string> => {
+  if (
+    typeof snapshot !== "object" ||
+    snapshot === null ||
+    !("format" in snapshot) ||
+    snapshot.format !== 2 ||
+    !("rows" in snapshot) ||
+    !Array.isArray(snapshot.rows)
+  ) {
+    return new Map();
+  }
+  return new Map(
+    snapshot.rows.flatMap((row: unknown) =>
+      Array.isArray(row) &&
+      typeof row[0] === "string" &&
+      typeof row[3] === "string"
+        ? [[row[0], row[3]] as const]
+        : [],
+    ),
+  );
+};
+
+/** How many times a recheck runs each mutant. */
+export const RECHECKS = 2;
+
+/**
+ * Mutants to run again without the previous results.
+ *
+ * mutator keeps a previous `Killed` verdict while any of the tests that
+ * killed the mutant is unchanged. On a busy machine an unrelated test can
+ * fail by chance while a mutant runs and is then recorded as one of its
+ * killers. If the change weakens the test that really detected the mutant,
+ * the unrelated, unchanged killer keeps the old verdict, and mutator reports
+ * no regression. So a mutant is run again when the baseline killed it with
+ * both changed or removed tests and unchanged ones, its function is
+ * unchanged, it still counts as detected, and mutator did not already report
+ * it. Mutants whose killers all changed are run again by mutator itself.
+ */
+export const recheckCandidates = (
+  base: MutationReport,
+  current: MutationReport,
+  baseScopes: ReadonlyMap<string, string>,
+  currentScopes: ReadonlyMap<string, string>,
+): readonly string[] => {
+  const touched = new Set([...current.changedTests, ...current.removedTests]);
+  const reported = new Set(
+    current.findings
+      .filter((finding) => finding.kind === "detectionRegression")
+      .map((finding) => finding.key),
+  );
+  const before = new Map(
+    [...base.files.values()].flat().map((mutant) => [mutant.id, mutant]),
+  );
+  return [...current.files.values()]
+    .flat()
+    .filter((mutant) => {
+      const old = before.get(mutant.id);
+      const scope = baseScopes.get(mutant.id);
+      return (
+        old !== undefined &&
+        old.status === "Killed" &&
+        old.killedBy.some((test) => touched.has(test)) &&
+        old.killedBy.some((test) => !touched.has(test)) &&
+        (mutant.status === "Killed" || mutant.status === "Timeout") &&
+        !reported.has(mutant.id) &&
+        scope !== undefined &&
+        scope === currentScopes.get(mutant.id)
+      );
+    })
+    .map((mutant) => mutant.id)
+    .sort();
+};
+
+/** An error for each rechecked mutant that one of the reruns did not detect. */
+export const reviewRechecked = (
+  current: MutationReport,
+  keys: readonly string[],
+  reruns: readonly MutationReport[],
+): readonly string[] => {
+  const statuses = reruns.map(
+    (rerun) =>
+      new Map(
+        [...rerun.files.values()].flat().map((mutant) => [mutant.id, mutant]),
+      ),
+  );
+  return keys
+    .filter((key) =>
+      statuses.some((status) => UNDETECTED.has(status.get(key)?.status ?? "")),
+    )
+    .map((key) => {
+      const { change, place } = placeMutant(current, key);
+      return formatAnnotation({
+        level: "error",
+        title: "テストが弱くなった",
+        message: `変わっていないコードのミュータント${key}${change}を、前の結果を使わずに実行し直すと、どのテストも検出しません。基準では変えたテストと変わっていないテストの両方が検出したと記録されていたため、mutatorは前の結果を使っていました。${REGRESSION_ADVICE}`,
+        ...place,
+      });
+    });
+};
+
+/**
  * Review the findings of a report.
  *
  * Fails when the report has a detection regression, or when mutator had no

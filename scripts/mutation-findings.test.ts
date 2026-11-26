@@ -5,8 +5,11 @@ import {
   decodeReport,
   formatAnnotation,
   type MutationReport,
+  recheckCandidates,
   reviewFindings,
+  reviewRechecked,
   reviewSettingChanges,
+  scopeHashes,
 } from "./mutation-findings.ts";
 
 const REGRESSION_ADVICE =
@@ -267,6 +270,129 @@ describe("crossCheckRegressions", () => {
     expect(review.lines.at(-1)).toBe(
       "テストが弱くなった箇所: 2件、何も検出しない新しいテスト: 0件、テストが検出できないミュータント: 0件",
     );
+  });
+});
+
+describe("recheck", () => {
+  const mutant = (id: string, status: string, killedBy: string[] = []) => ({
+    id,
+    mutatorName: "BooleanLiteral",
+    replacement: "true",
+    location: { start: { line: 4, column: 1 } },
+    status,
+    killedBy,
+  });
+  const changed = "src/core/a.test.ts#changed";
+  const unrelated = "src/core/b.test.ts#unrelated";
+  const baseReport = report({
+    ...base,
+    findings: [],
+    files: {
+      "src/core/a.ts": {
+        mutants: [
+          mutant("mixed", "Killed", [changed, unrelated]),
+          mutant("changedOnly", "Killed", [changed]),
+          mutant("unchangedOnly", "Killed", [unrelated]),
+          mutant("edited", "Killed", [changed, unrelated]),
+          mutant("reported", "Killed", [changed, unrelated]),
+        ],
+      },
+    },
+  });
+  const current = report({
+    ...base,
+    findings: [{ kind: "detectionRegression", key: "reported" }],
+    testChanges: { added: [], changed: [changed], removed: [] },
+    files: {
+      "src/core/a.ts": {
+        mutants: [
+          mutant("mixed", "Killed", [changed, unrelated]),
+          mutant("changedOnly", "Killed", [changed]),
+          mutant("unchangedOnly", "Killed", [unrelated]),
+          mutant("edited", "Killed", [changed, unrelated]),
+          mutant("reported", "Survived"),
+        ],
+      },
+    },
+  });
+  const scopes = (edited: string) =>
+    new Map([
+      ["mixed", "s1"],
+      ["changedOnly", "s1"],
+      ["unchangedOnly", "s1"],
+      ["edited", edited],
+      ["reported", "s1"],
+    ]);
+
+  it("picks mutants killed by both changed and unchanged tests in an unchanged function", () => {
+    expect(
+      recheckCandidates(baseReport, current, scopes("s1"), scopes("s2")),
+    ).toEqual(["mixed"]);
+  });
+
+  it("fails each mutant that a rerun did not detect", () => {
+    const rerun = (status: string) =>
+      report({
+        ...base,
+        findings: [],
+        files: { "src/core/a.ts": { mutants: [mutant("mixed", status)] } },
+      });
+    expect(
+      reviewRechecked(current, ["mixed"], [rerun("Killed"), rerun("Killed")]),
+    ).toEqual([]);
+    const lines = reviewRechecked(
+      current,
+      ["mixed"],
+      [rerun("Killed"), rerun("Survived")],
+    );
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatch(
+      /^::error file=src\/core\/a\.ts,line=4,title=テストが弱くなった::変わっていないコードのミュータントmixed/,
+    );
+    expect(lines[0]).toContain("mutator acceptで通さないでください");
+  });
+
+  it("catches the regressions mutator missed by reusing a baseline kill, in reports from mutator 0.4.5", () => {
+    const fixture = JSON.parse(
+      readFileSync(
+        new URL("./fixtures/mutator-0.4.5-reused-kill.json", import.meta.url),
+        "utf8",
+      ),
+    );
+    const current = report(fixture.current);
+    expect(current.findings).toEqual([]);
+    const keys = recheckCandidates(
+      report(fixture.base),
+      current,
+      scopeHashes(fixture.baseSnapshot),
+      scopeHashes(fixture.currentSnapshot),
+    );
+    expect(keys).toHaveLength(14);
+    const lines = reviewRechecked(current, keys, [report(fixture.rerun)]);
+    expect(
+      lines.map((line) => /ミュータント([a-z0-9]+)/.exec(line)?.[1]),
+    ).toEqual([
+      "18e4gph9vjs",
+      "1gfsysf9ilu",
+      "1hzfnwizh8n",
+      "5zuqzzf1xb",
+      "d9lrij95oz",
+      "kvpjevjjvc",
+      "strzyhiu4g",
+    ]);
+  });
+
+  it("reads scope hashes from a format 2 snapshot only", () => {
+    expect(
+      scopeHashes({
+        format: 2,
+        rows: [["k", 0, 1, "hash", "Killed"], ["bad"], "x"],
+      }),
+    ).toEqual(new Map([["k", "hash"]]));
+    expect(scopeHashes({ format: 3, rows: [["k", 0, 1, "hash"]] })).toEqual(
+      new Map(),
+    );
+    expect(scopeHashes(null)).toEqual(new Map());
   });
 });
 

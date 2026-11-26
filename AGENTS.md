@@ -106,7 +106,9 @@ entrypoints  →  layers / services  →  core
   `--include-test-changes --kill-matrix`付きで実行し、`scripts/mutation-findings.ts`（純関数）と
   `scripts/check-mutation-findings.ts`（`pnpm mutation:findings`）が判定する。基準と今のレポートも
   突き合わせ、ソースが変わっていないファイルで基準では`Killed`（または、変更で説明できる`Timeout`）、
-  今は`Survived` / `NoCoverage`のミュータントも失敗にする（負荷で基準が`Timeout`になった時の見逃しを防ぐ）。基準と比べられなかった
+  今は`Survived` / `NoCoverage`のミュータントも失敗にする（負荷で基準が`Timeout`になった時の見逃しを防ぐ）。
+  基準の検出したテストに変えたテストと変わっていないテストが混ざるミュータントは、`scripts/mutation-recheck.ts`が
+  前の結果を使わずに2回実行し直して確かめる（負荷で関係の無いテストが検出したテストに数えられた時の見逃しを防ぐ）。基準と比べられなかった
   レポート（`comparison: "unavailable"`）や、形の違うレポート、基準を作れない時（worktreeの準備や
   依存の導入に失敗した、ベースのテストが今の環境で落ちる、など）も失敗にする。何も検出しない新しいテスト（`newTestNoKills`）と
   検出できないミュータントは警告、全件のスコアは表示だけ。`pnpm check`（とpre-push）は`origin/main`を

@@ -27,7 +27,10 @@
 #    scripts/check-mutation-findings.ts. Besides mutator's own regressions, it
 #    compares the baseline's report with the current one: mutator counts only
 #    a `Killed` baseline verdict, and a busy machine can turn one into
-#    `Timeout`.
+#    `Timeout`. Then scripts/mutation-recheck.ts runs again, without the
+#    previous results, the mutants whose baseline killers mix changed and
+#    unchanged tests (an unrelated test that failed by chance keeps mutator's
+#    previous verdict).
 #
 # Exit codes: 0 when the tests kept their strength. 1 when the tests got
 # weaker or left out, when no baseline could be made (e.g. the base's tests fail with this
@@ -170,8 +173,9 @@ if ! (cd "$tree" && GITHUB_ACTIONS='' pnpm exec mutator --reporter json) >>"$wor
 fi
 echo "mutation:diff: baseline made in $(($(date +%s) - started))s"
 # The baseline's own report, for the cross-check in check-mutation-findings.ts.
-if ! cp "$tree/.mutator/report/mutation.json" "$work/base-report.json"; then
-  no_baseline "基準のレポート（.mutator/report/mutation.json）がありません"
+if ! cp "$tree/.mutator/report/mutation.json" "$work/base-report.json" ||
+  ! cp "$tree/.mutator/snapshot.json" "$work/base-snapshot.json"; then
+  no_baseline "基準のレポートかsnapshot（.mutator/report/mutation.json、.mutator/snapshot.json）がありません"
 fi
 
 # What the base collected with its own settings. The saved config files go
@@ -219,6 +223,11 @@ status=0
 node --experimental-strip-types --disable-warning=ExperimentalWarning \
   scripts/check-mutation-findings.ts "$merge_base" "${watch_args[@]}" \
   --base-report "$work/base-report.json" || status=$?
+# mutator keeps a baseline Killed while any of its killers is unchanged, so an
+# unrelated test that failed by chance in the baseline can hide a weakened
+# test. Those mutants run again without the previous results.
+node --experimental-strip-types --disable-warning=ExperimentalWarning \
+  scripts/mutation-recheck.ts "$work" || status=1
 echo "mutation:diff: done in $(($(date +%s) - started))s"
 if [ "$scope_status" -ne 0 ]; then exit 1; fi
 exit "$status"

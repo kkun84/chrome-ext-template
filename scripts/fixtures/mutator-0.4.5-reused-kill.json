@@ -1,0 +1,890 @@
+{
+  "base": {
+    "schemaVersion": "2",
+    "comparison": "unavailable",
+    "findings": [],
+    "files": {
+      "src/core/tabs.ts": {
+        "language": "typescript",
+        "mutants": [
+          {
+            "id": "1gfsysf9ilu",
+            "mutatorName": "ConditionalExpression",
+            "replacement": "false",
+            "location": {
+              "start": { "line": 37, "column": 7 },
+              "end": { "line": 37, "column": 30 }
+            },
+            "status": "Killed",
+            "killedBy": [
+              "src/core/tabs.test.ts#selectPersistableUrl > prefers the active tab over an earlier tab in the last-focused window",
+              "src/core/messages.test.ts#decodeRequestEnvelope > decodes a save-current-tab request"
+            ],
+            "coveredBy": [
+              "src/core/tabs.test.ts#selectPersistableUrl > prefers the active tab when it has a persistable URL",
+              "src/core/tabs.test.ts#selectPersistableUrl > falls back to a persistable tab when the active tab is the popup",
+              "src/core/tabs.test.ts#selectPersistableUrl > prefers the last-focused window over other windows",
+              "src/core/tabs.test.ts#selectPersistableUrl > returns undefined when no candidate is persistable",
+              "src/core/tabs.test.ts#selectPersistableUrl > prefers the active tab over an earlier tab in the last-focused window",
+              "src/core/tabs.test.ts#selectPersistableUrl > skips non-persistable tabs in the last-focused window",
+              "src/core/tabs.test.ts#selectPersistableUrl > falls back to any persistable tab, skipping non-persistable ones",
+              "src/core/tabs.test.ts#selectPersistableUrl > returns undefined for an empty list"
+            ]
+          },
+          {
+            "id": "1wu4qwvritv",
+            "mutatorName": "EqualityOperator",
+            "replacement": "activeUrl === undefined",
+            "location": {
+              "start": { "line": 37, "column": 7 },
+              "end": { "line": 37, "column": 30 }
+            },
+            "status": "Killed",
+            "killedBy": [
+              "src/core/tabs.test.ts#selectPersistableUrl > falls back to a persistable tab when the active tab is the popup",
+              "src/core/messages.test.ts#decodeRequestEnvelope > decodes a save-current-tab request"
+            ],
+            "coveredBy": [
+              "src/core/tabs.test.ts#selectPersistableUrl > prefers the active tab when it has a persistable URL",
+              "src/core/tabs.test.ts#selectPersistableUrl > falls back to a persistable tab when the active tab is the popup",
+              "src/core/tabs.test.ts#selectPersistableUrl > prefers the last-focused window over other windows",
+              "src/core/tabs.test.ts#selectPersistableUrl > returns undefined when no candidate is persistable",
+              "src/core/tabs.test.ts#selectPersistableUrl > prefers the active tab over an earlier tab in the last-focused window",
+              "src/core/tabs.test.ts#selectPersistableUrl > skips non-persistable tabs in the last-focused window",
+              "src/core/tabs.test.ts#selectPersistableUrl > falls back to any persistable tab, skipping non-persistable ones",
+              "src/core/tabs.test.ts#selectPersistableUrl > returns undefined for an empty list"
+            ]
+          },
+          {
+            "id": "5zuqzzf1xb",
+            "mutatorName": "BlockStatement",
+            "replacement": "{}",
+            "location": {
+              "start": { "line": 37, "column": 32 },
+              "end": { "line": 39, "column": 4 }
+            },
+            "status": "Killed",
+            "killedBy": [
+              "src/core/tabs.test.ts#selectPersistableUrl > prefers the active tab over an earlier tab in the last-focused window",
+              "src/core/messages.test.ts#decodeRequestEnvelope > decodes a save-current-tab request"
+            ],
+            "coveredBy": [
+              "src/core/tabs.test.ts#selectPersistableUrl > prefers the active tab when it has a persistable URL",
+              "src/core/tabs.test.ts#selectPersistableUrl > prefers the active tab over an earlier tab in the last-focused window"
+            ]
+          },
+          {
+            "id": "18e4gph9vjs",
+            "mutatorName": "LogicalOperator",
+            "replacement": "(tab.lastFocusedWindow || usable(tab) !== undefined)",
+            "location": {
+              "start": { "line": 42, "column": 14 },
+              "end": { "line": 42, "column": 64 }
+            },
+            "status": "Killed",
+            "killedBy": [
+              "src/core/tabs.test.ts#selectPersistableUrl > prefers the last-focused window over other windows",
+              "src/core/messages.test.ts#decodeRequestEnvelope > decodes a save-current-tab request"
+            ],
+            "coveredBy": [
+              "src/core/tabs.test.ts#selectPersistableUrl > falls back to a persistable tab when the active tab is the popup",
+              "src/core/tabs.test.ts#selectPersistableUrl > prefers the last-focused window over other windows",
+              "src/core/tabs.test.ts#selectPersistableUrl > returns undefined when no candidate is persistable",
+              "src/core/tabs.test.ts#selectPersistableUrl > skips non-persistable tabs in the last-focused window",
+              "src/core/tabs.test.ts#selectPersistableUrl > falls back to any persistable tab, skipping non-persistable ones"
+            ]
+          },
+          {
+            "id": "strzyhiu4g",
+            "mutatorName": "ConditionalExpression",
+            "replacement": "true",
+            "location": {
+              "start": { "line": 42, "column": 39 },
+              "end": { "line": 42, "column": 64 }
+            },
+            "status": "Killed",
+            "killedBy": [
+              "src/core/tabs.test.ts#selectPersistableUrl > skips non-persistable tabs in the last-focused window",
+              "src/core/messages.test.ts#decodeRequestEnvelope > decodes a save-current-tab request"
+            ],
+            "coveredBy": [
+              "src/core/tabs.test.ts#selectPersistableUrl > falls back to a persistable tab when the active tab is the popup",
+              "src/core/tabs.test.ts#selectPersistableUrl > prefers the last-focused window over other windows",
+              "src/core/tabs.test.ts#selectPersistableUrl > skips non-persistable tabs in the last-focused window"
+            ]
+          },
+          {
+            "id": "1hzfnwizh8n",
+            "mutatorName": "EqualityOperator",
+            "replacement": "usable(tab) === undefined",
+            "location": {
+              "start": { "line": 42, "column": 39 },
+              "end": { "line": 42, "column": 64 }
+            },
+            "status": "Killed",
+            "killedBy": [
+              "src/core/tabs.test.ts#selectPersistableUrl > prefers the last-focused window over other windows",
+              "src/core/messages.test.ts#decodeRequestEnvelope > decodes a save-current-tab request"
+            ],
+            "coveredBy": [
+              "src/core/tabs.test.ts#selectPersistableUrl > falls back to a persistable tab when the active tab is the popup",
+              "src/core/tabs.test.ts#selectPersistableUrl > prefers the last-focused window over other windows",
+              "src/core/tabs.test.ts#selectPersistableUrl > skips non-persistable tabs in the last-focused window"
+            ]
+          },
+          {
+            "id": "d9lrij95oz",
+            "mutatorName": "ConditionalExpression",
+            "replacement": "false",
+            "location": {
+              "start": { "line": 45, "column": 7 },
+              "end": { "line": 45, "column": 31 }
+            },
+            "status": "Killed",
+            "killedBy": [
+              "src/core/tabs.test.ts#selectPersistableUrl > prefers the last-focused window over other windows",
+              "src/core/messages.test.ts#decodeRequestEnvelope > decodes a save-current-tab request"
+            ],
+            "coveredBy": [
+              "src/core/tabs.test.ts#selectPersistableUrl > falls back to a persistable tab when the active tab is the popup",
+              "src/core/tabs.test.ts#selectPersistableUrl > prefers the last-focused window over other windows",
+              "src/core/tabs.test.ts#selectPersistableUrl > returns undefined when no candidate is persistable",
+              "src/core/tabs.test.ts#selectPersistableUrl > skips non-persistable tabs in the last-focused window",
+              "src/core/tabs.test.ts#selectPersistableUrl > falls back to any persistable tab, skipping non-persistable ones",
+              "src/core/tabs.test.ts#selectPersistableUrl > returns undefined for an empty list"
+            ]
+          },
+          {
+            "id": "2575vuclhrs",
+            "mutatorName": "EqualityOperator",
+            "replacement": "focusedUrl === undefined",
+            "location": {
+              "start": { "line": 45, "column": 7 },
+              "end": { "line": 45, "column": 31 }
+            },
+            "status": "Killed",
+            "killedBy": [
+              "src/core/tabs.test.ts#selectPersistableUrl > prefers the last-focused window over other windows",
+              "src/core/messages.test.ts#decodeRequestEnvelope > decodes a save-current-tab request"
+            ],
+            "coveredBy": [
+              "src/core/tabs.test.ts#selectPersistableUrl > falls back to a persistable tab when the active tab is the popup",
+              "src/core/tabs.test.ts#selectPersistableUrl > prefers the last-focused window over other windows",
+              "src/core/tabs.test.ts#selectPersistableUrl > returns undefined when no candidate is persistable",
+              "src/core/tabs.test.ts#selectPersistableUrl > skips non-persistable tabs in the last-focused window",
+              "src/core/tabs.test.ts#selectPersistableUrl > falls back to any persistable tab, skipping non-persistable ones",
+              "src/core/tabs.test.ts#selectPersistableUrl > returns undefined for an empty list"
+            ]
+          },
+          {
+            "id": "kvpjevjjvc",
+            "mutatorName": "BlockStatement",
+            "replacement": "{}",
+            "location": {
+              "start": { "line": 45, "column": 33 },
+              "end": { "line": 47, "column": 4 }
+            },
+            "status": "Killed",
+            "killedBy": [
+              "src/core/tabs.test.ts#selectPersistableUrl > prefers the last-focused window over other windows",
+              "src/core/messages.test.ts#decodeRequestEnvelope > decodes a save-current-tab request"
+            ],
+            "coveredBy": [
+              "src/core/tabs.test.ts#selectPersistableUrl > falls back to a persistable tab when the active tab is the popup",
+              "src/core/tabs.test.ts#selectPersistableUrl > prefers the last-focused window over other windows",
+              "src/core/tabs.test.ts#selectPersistableUrl > skips non-persistable tabs in the last-focused window"
+            ]
+          },
+          {
+            "id": "165cmxcwqpm",
+            "mutatorName": "EqualityOperator",
+            "replacement": "usable(tab) === undefined",
+            "location": {
+              "start": { "line": 49, "column": 37 },
+              "end": { "line": 49, "column": 62 }
+            },
+            "status": "Killed",
+            "killedBy": [
+              "src/core/tabs.test.ts#selectPersistableUrl > falls back to any persistable tab, skipping non-persistable ones",
+              "src/core/messages.test.ts#decodeRequestEnvelope > decodes a save-current-tab request"
+            ],
+            "coveredBy": [
+              "src/core/tabs.test.ts#selectPersistableUrl > returns undefined when no candidate is persistable",
+              "src/core/tabs.test.ts#selectPersistableUrl > falls back to any persistable tab, skipping non-persistable ones"
+            ]
+          }
+        ]
+      },
+      "src/core/url.ts": {
+        "language": "typescript",
+        "mutants": [
+          {
+            "id": "2ghr84lftiw",
+            "mutatorName": "ArrayDeclaration",
+            "replacement": "[]",
+            "location": {
+              "start": { "line": 3, "column": 29 },
+              "end": { "line": 3, "column": 48 }
+            },
+            "status": "Killed",
+            "killedBy": [
+              "src/core/messages.test.ts#Response > decodes each kind of response",
+              "src/core/saved-urls.test.ts#addUrl > adds to the front and keeps newest first",
+              "src/core/tabs.test.ts#selectPersistableUrl > prefers the last-focused window over other windows",
+              "src/core/messages.test.ts#decodeRequestEnvelope > decodes a save-current-tab request"
+            ],
+            "coveredBy": []
+          },
+          {
+            "id": "2ev5cco2y8y",
+            "mutatorName": "StringLiteral",
+            "replacement": "\"\"",
+            "location": {
+              "start": { "line": 3, "column": 30 },
+              "end": { "line": 3, "column": 37 }
+            },
+            "status": "Killed",
+            "killedBy": [
+              "src/core/saved-urls.test.ts#normalizeUrl > accepts http and https URLs and trims whitespace",
+              "src/core/tabs.test.ts#selectPersistableUrl > falls back to any persistable tab, skipping non-persistable ones",
+              "src/core/messages.test.ts#decodeRequestEnvelope > decodes a save-current-tab request"
+            ],
+            "coveredBy": []
+          },
+          {
+            "id": "17nmvkd1gxj",
+            "mutatorName": "StringLiteral",
+            "replacement": "\"\"",
+            "location": {
+              "start": { "line": 3, "column": 39 },
+              "end": { "line": 3, "column": 47 }
+            },
+            "status": "Killed",
+            "killedBy": [
+              "src/core/messages.test.ts#Response > decodes each kind of response",
+              "src/core/saved-urls.test.ts#addUrl > adds to the front and keeps newest first",
+              "src/core/tabs.test.ts#selectPersistableUrl > prefers the last-focused window over other windows",
+              "src/core/messages.test.ts#decodeRequestEnvelope > decodes a save-current-tab request"
+            ],
+            "coveredBy": []
+          },
+          {
+            "id": "1nk43e86ajz",
+            "mutatorName": "StringLiteral",
+            "replacement": "\"\"",
+            "location": {
+              "start": { "line": 49, "column": 61 },
+              "end": { "line": 49, "column": 74 }
+            },
+            "status": "Killed",
+            "killedBy": [
+              "src/core/saved-urls.test.ts#normalizeUrl > rejects empty input with a typed error",
+              "src/core/messages.test.ts#Response > decodes each kind of response",
+              "src/core/tabs.test.ts#selectPersistableUrl > prefers the last-focused window over other windows",
+              "src/core/messages.test.ts#decodeRequestEnvelope > decodes a save-current-tab request"
+            ],
+            "coveredBy": []
+          }
+        ]
+      }
+    }
+  },
+  "current": {
+    "schemaVersion": "2",
+    "comparison": "available",
+    "findings": [],
+    "testChanges": {
+      "added": [],
+      "changed": [
+        "src/core/tabs.test.ts#selectPersistableUrl > falls back to a persistable tab when the active tab is the popup",
+        "src/core/tabs.test.ts#selectPersistableUrl > falls back to any persistable tab, skipping non-persistable ones",
+        "src/core/tabs.test.ts#selectPersistableUrl > prefers the active tab over an earlier tab in the last-focused window",
+        "src/core/tabs.test.ts#selectPersistableUrl > prefers the active tab when it has a persistable URL",
+        "src/core/tabs.test.ts#selectPersistableUrl > prefers the last-focused window over other windows",
+        "src/core/tabs.test.ts#selectPersistableUrl > returns undefined for an empty list",
+        "src/core/tabs.test.ts#selectPersistableUrl > returns undefined when no candidate is persistable",
+        "src/core/tabs.test.ts#selectPersistableUrl > skips non-persistable tabs in the last-focused window"
+      ],
+      "removed": []
+    },
+    "files": {
+      "src/core/tabs.ts": {
+        "language": "typescript",
+        "mutants": [
+          {
+            "id": "1gfsysf9ilu",
+            "mutatorName": "ConditionalExpression",
+            "replacement": "false",
+            "location": {
+              "start": { "line": 37, "column": 7 },
+              "end": { "line": 37, "column": 30 }
+            },
+            "status": "Killed",
+            "killedBy": [
+              "src/core/tabs.test.ts#selectPersistableUrl > prefers the active tab over an earlier tab in the last-focused window",
+              "src/core/messages.test.ts#decodeRequestEnvelope > decodes a save-current-tab request"
+            ],
+            "coveredBy": [
+              "src/core/tabs.test.ts#selectPersistableUrl > prefers the active tab when it has a persistable URL",
+              "src/core/tabs.test.ts#selectPersistableUrl > falls back to a persistable tab when the active tab is the popup",
+              "src/core/tabs.test.ts#selectPersistableUrl > prefers the last-focused window over other windows",
+              "src/core/tabs.test.ts#selectPersistableUrl > returns undefined when no candidate is persistable",
+              "src/core/tabs.test.ts#selectPersistableUrl > prefers the active tab over an earlier tab in the last-focused window",
+              "src/core/tabs.test.ts#selectPersistableUrl > skips non-persistable tabs in the last-focused window",
+              "src/core/tabs.test.ts#selectPersistableUrl > falls back to any persistable tab, skipping non-persistable ones",
+              "src/core/tabs.test.ts#selectPersistableUrl > returns undefined for an empty list"
+            ]
+          },
+          {
+            "id": "1wu4qwvritv",
+            "mutatorName": "EqualityOperator",
+            "replacement": "activeUrl === undefined",
+            "location": {
+              "start": { "line": 37, "column": 7 },
+              "end": { "line": 37, "column": 30 }
+            },
+            "status": "Killed",
+            "killedBy": [
+              "src/core/tabs.test.ts#selectPersistableUrl > falls back to a persistable tab when the active tab is the popup",
+              "src/core/messages.test.ts#decodeRequestEnvelope > decodes a save-current-tab request"
+            ],
+            "coveredBy": [
+              "src/core/tabs.test.ts#selectPersistableUrl > prefers the active tab when it has a persistable URL",
+              "src/core/tabs.test.ts#selectPersistableUrl > falls back to a persistable tab when the active tab is the popup",
+              "src/core/tabs.test.ts#selectPersistableUrl > prefers the last-focused window over other windows",
+              "src/core/tabs.test.ts#selectPersistableUrl > returns undefined when no candidate is persistable",
+              "src/core/tabs.test.ts#selectPersistableUrl > prefers the active tab over an earlier tab in the last-focused window",
+              "src/core/tabs.test.ts#selectPersistableUrl > skips non-persistable tabs in the last-focused window",
+              "src/core/tabs.test.ts#selectPersistableUrl > falls back to any persistable tab, skipping non-persistable ones",
+              "src/core/tabs.test.ts#selectPersistableUrl > returns undefined for an empty list"
+            ]
+          },
+          {
+            "id": "5zuqzzf1xb",
+            "mutatorName": "BlockStatement",
+            "replacement": "{}",
+            "location": {
+              "start": { "line": 37, "column": 32 },
+              "end": { "line": 39, "column": 4 }
+            },
+            "status": "Killed",
+            "killedBy": [
+              "src/core/tabs.test.ts#selectPersistableUrl > prefers the active tab over an earlier tab in the last-focused window",
+              "src/core/messages.test.ts#decodeRequestEnvelope > decodes a save-current-tab request"
+            ],
+            "coveredBy": [
+              "src/core/tabs.test.ts#selectPersistableUrl > prefers the active tab when it has a persistable URL",
+              "src/core/tabs.test.ts#selectPersistableUrl > prefers the active tab over an earlier tab in the last-focused window"
+            ]
+          },
+          {
+            "id": "18e4gph9vjs",
+            "mutatorName": "LogicalOperator",
+            "replacement": "(tab.lastFocusedWindow || usable(tab) !== undefined)",
+            "location": {
+              "start": { "line": 42, "column": 14 },
+              "end": { "line": 42, "column": 64 }
+            },
+            "status": "Killed",
+            "killedBy": [
+              "src/core/tabs.test.ts#selectPersistableUrl > prefers the last-focused window over other windows",
+              "src/core/messages.test.ts#decodeRequestEnvelope > decodes a save-current-tab request"
+            ],
+            "coveredBy": [
+              "src/core/tabs.test.ts#selectPersistableUrl > falls back to a persistable tab when the active tab is the popup",
+              "src/core/tabs.test.ts#selectPersistableUrl > prefers the last-focused window over other windows",
+              "src/core/tabs.test.ts#selectPersistableUrl > returns undefined when no candidate is persistable",
+              "src/core/tabs.test.ts#selectPersistableUrl > skips non-persistable tabs in the last-focused window",
+              "src/core/tabs.test.ts#selectPersistableUrl > falls back to any persistable tab, skipping non-persistable ones"
+            ]
+          },
+          {
+            "id": "strzyhiu4g",
+            "mutatorName": "ConditionalExpression",
+            "replacement": "true",
+            "location": {
+              "start": { "line": 42, "column": 39 },
+              "end": { "line": 42, "column": 64 }
+            },
+            "status": "Killed",
+            "killedBy": [
+              "src/core/tabs.test.ts#selectPersistableUrl > skips non-persistable tabs in the last-focused window",
+              "src/core/messages.test.ts#decodeRequestEnvelope > decodes a save-current-tab request"
+            ],
+            "coveredBy": [
+              "src/core/tabs.test.ts#selectPersistableUrl > falls back to a persistable tab when the active tab is the popup",
+              "src/core/tabs.test.ts#selectPersistableUrl > prefers the last-focused window over other windows",
+              "src/core/tabs.test.ts#selectPersistableUrl > skips non-persistable tabs in the last-focused window"
+            ]
+          },
+          {
+            "id": "1hzfnwizh8n",
+            "mutatorName": "EqualityOperator",
+            "replacement": "usable(tab) === undefined",
+            "location": {
+              "start": { "line": 42, "column": 39 },
+              "end": { "line": 42, "column": 64 }
+            },
+            "status": "Killed",
+            "killedBy": [
+              "src/core/tabs.test.ts#selectPersistableUrl > prefers the last-focused window over other windows",
+              "src/core/messages.test.ts#decodeRequestEnvelope > decodes a save-current-tab request"
+            ],
+            "coveredBy": [
+              "src/core/tabs.test.ts#selectPersistableUrl > falls back to a persistable tab when the active tab is the popup",
+              "src/core/tabs.test.ts#selectPersistableUrl > prefers the last-focused window over other windows",
+              "src/core/tabs.test.ts#selectPersistableUrl > skips non-persistable tabs in the last-focused window"
+            ]
+          },
+          {
+            "id": "d9lrij95oz",
+            "mutatorName": "ConditionalExpression",
+            "replacement": "false",
+            "location": {
+              "start": { "line": 45, "column": 7 },
+              "end": { "line": 45, "column": 31 }
+            },
+            "status": "Killed",
+            "killedBy": [
+              "src/core/tabs.test.ts#selectPersistableUrl > prefers the last-focused window over other windows",
+              "src/core/messages.test.ts#decodeRequestEnvelope > decodes a save-current-tab request"
+            ],
+            "coveredBy": [
+              "src/core/tabs.test.ts#selectPersistableUrl > falls back to a persistable tab when the active tab is the popup",
+              "src/core/tabs.test.ts#selectPersistableUrl > prefers the last-focused window over other windows",
+              "src/core/tabs.test.ts#selectPersistableUrl > returns undefined when no candidate is persistable",
+              "src/core/tabs.test.ts#selectPersistableUrl > skips non-persistable tabs in the last-focused window",
+              "src/core/tabs.test.ts#selectPersistableUrl > falls back to any persistable tab, skipping non-persistable ones",
+              "src/core/tabs.test.ts#selectPersistableUrl > returns undefined for an empty list"
+            ]
+          },
+          {
+            "id": "2575vuclhrs",
+            "mutatorName": "EqualityOperator",
+            "replacement": "focusedUrl === undefined",
+            "location": {
+              "start": { "line": 45, "column": 7 },
+              "end": { "line": 45, "column": 31 }
+            },
+            "status": "Killed",
+            "killedBy": [
+              "src/core/tabs.test.ts#selectPersistableUrl > prefers the last-focused window over other windows",
+              "src/core/messages.test.ts#decodeRequestEnvelope > decodes a save-current-tab request"
+            ],
+            "coveredBy": [
+              "src/core/tabs.test.ts#selectPersistableUrl > falls back to a persistable tab when the active tab is the popup",
+              "src/core/tabs.test.ts#selectPersistableUrl > prefers the last-focused window over other windows",
+              "src/core/tabs.test.ts#selectPersistableUrl > returns undefined when no candidate is persistable",
+              "src/core/tabs.test.ts#selectPersistableUrl > skips non-persistable tabs in the last-focused window",
+              "src/core/tabs.test.ts#selectPersistableUrl > falls back to any persistable tab, skipping non-persistable ones",
+              "src/core/tabs.test.ts#selectPersistableUrl > returns undefined for an empty list"
+            ]
+          },
+          {
+            "id": "kvpjevjjvc",
+            "mutatorName": "BlockStatement",
+            "replacement": "{}",
+            "location": {
+              "start": { "line": 45, "column": 33 },
+              "end": { "line": 47, "column": 4 }
+            },
+            "status": "Killed",
+            "killedBy": [
+              "src/core/tabs.test.ts#selectPersistableUrl > prefers the last-focused window over other windows",
+              "src/core/messages.test.ts#decodeRequestEnvelope > decodes a save-current-tab request"
+            ],
+            "coveredBy": [
+              "src/core/tabs.test.ts#selectPersistableUrl > falls back to a persistable tab when the active tab is the popup",
+              "src/core/tabs.test.ts#selectPersistableUrl > prefers the last-focused window over other windows",
+              "src/core/tabs.test.ts#selectPersistableUrl > skips non-persistable tabs in the last-focused window"
+            ]
+          },
+          {
+            "id": "165cmxcwqpm",
+            "mutatorName": "EqualityOperator",
+            "replacement": "usable(tab) === undefined",
+            "location": {
+              "start": { "line": 49, "column": 37 },
+              "end": { "line": 49, "column": 62 }
+            },
+            "status": "Killed",
+            "killedBy": [
+              "src/core/tabs.test.ts#selectPersistableUrl > falls back to any persistable tab, skipping non-persistable ones",
+              "src/core/messages.test.ts#decodeRequestEnvelope > decodes a save-current-tab request"
+            ],
+            "coveredBy": [
+              "src/core/tabs.test.ts#selectPersistableUrl > returns undefined when no candidate is persistable",
+              "src/core/tabs.test.ts#selectPersistableUrl > falls back to any persistable tab, skipping non-persistable ones"
+            ]
+          }
+        ]
+      },
+      "src/core/url.ts": {
+        "language": "typescript",
+        "mutants": [
+          {
+            "id": "2ghr84lftiw",
+            "mutatorName": "ArrayDeclaration",
+            "replacement": "[]",
+            "location": {
+              "start": { "line": 3, "column": 29 },
+              "end": { "line": 3, "column": 48 }
+            },
+            "status": "Killed",
+            "killedBy": [
+              "src/core/messages.test.ts#Response > decodes each kind of response",
+              "src/core/saved-urls.test.ts#addUrl > adds to the front and keeps newest first",
+              "src/core/tabs.test.ts#selectPersistableUrl > prefers the last-focused window over other windows",
+              "src/core/messages.test.ts#decodeRequestEnvelope > decodes a save-current-tab request"
+            ],
+            "coveredBy": []
+          },
+          {
+            "id": "2ev5cco2y8y",
+            "mutatorName": "StringLiteral",
+            "replacement": "\"\"",
+            "location": {
+              "start": { "line": 3, "column": 30 },
+              "end": { "line": 3, "column": 37 }
+            },
+            "status": "Killed",
+            "killedBy": [
+              "src/core/saved-urls.test.ts#normalizeUrl > accepts http and https URLs and trims whitespace",
+              "src/core/tabs.test.ts#selectPersistableUrl > falls back to any persistable tab, skipping non-persistable ones",
+              "src/core/messages.test.ts#decodeRequestEnvelope > decodes a save-current-tab request"
+            ],
+            "coveredBy": []
+          },
+          {
+            "id": "17nmvkd1gxj",
+            "mutatorName": "StringLiteral",
+            "replacement": "\"\"",
+            "location": {
+              "start": { "line": 3, "column": 39 },
+              "end": { "line": 3, "column": 47 }
+            },
+            "status": "Killed",
+            "killedBy": [
+              "src/core/messages.test.ts#Response > decodes each kind of response",
+              "src/core/saved-urls.test.ts#addUrl > adds to the front and keeps newest first",
+              "src/core/tabs.test.ts#selectPersistableUrl > prefers the last-focused window over other windows",
+              "src/core/messages.test.ts#decodeRequestEnvelope > decodes a save-current-tab request"
+            ],
+            "coveredBy": []
+          },
+          {
+            "id": "1nk43e86ajz",
+            "mutatorName": "StringLiteral",
+            "replacement": "\"\"",
+            "location": {
+              "start": { "line": 49, "column": 61 },
+              "end": { "line": 49, "column": 74 }
+            },
+            "status": "Killed",
+            "killedBy": [
+              "src/core/saved-urls.test.ts#normalizeUrl > rejects empty input with a typed error",
+              "src/core/messages.test.ts#Response > decodes each kind of response",
+              "src/core/tabs.test.ts#selectPersistableUrl > prefers the last-focused window over other windows",
+              "src/core/messages.test.ts#decodeRequestEnvelope > decodes a save-current-tab request"
+            ],
+            "coveredBy": []
+          }
+        ]
+      }
+    }
+  },
+  "rerun": {
+    "schemaVersion": "2",
+    "comparison": "unavailable",
+    "findings": [],
+    "files": {
+      "src/core/tabs.ts": {
+        "language": "typescript",
+        "mutants": [
+          {
+            "id": "1gfsysf9ilu",
+            "mutatorName": "ConditionalExpression",
+            "replacement": "false",
+            "location": {
+              "start": { "line": 37, "column": 7 },
+              "end": { "line": 37, "column": 30 }
+            },
+            "status": "Survived",
+            "killedBy": [],
+            "coveredBy": [
+              "src/core/tabs.test.ts#selectPersistableUrl > prefers the active tab when it has a persistable URL",
+              "src/core/tabs.test.ts#selectPersistableUrl > falls back to a persistable tab when the active tab is the popup",
+              "src/core/tabs.test.ts#selectPersistableUrl > prefers the last-focused window over other windows",
+              "src/core/tabs.test.ts#selectPersistableUrl > returns undefined when no candidate is persistable",
+              "src/core/tabs.test.ts#selectPersistableUrl > prefers the active tab over an earlier tab in the last-focused window",
+              "src/core/tabs.test.ts#selectPersistableUrl > skips non-persistable tabs in the last-focused window",
+              "src/core/tabs.test.ts#selectPersistableUrl > falls back to any persistable tab, skipping non-persistable ones",
+              "src/core/tabs.test.ts#selectPersistableUrl > returns undefined for an empty list"
+            ]
+          },
+          {
+            "id": "1wu4qwvritv",
+            "mutatorName": "EqualityOperator",
+            "replacement": "activeUrl === undefined",
+            "location": {
+              "start": { "line": 37, "column": 7 },
+              "end": { "line": 37, "column": 30 }
+            },
+            "status": "Killed",
+            "killedBy": [
+              "src/core/tabs.test.ts#selectPersistableUrl > falls back to a persistable tab when the active tab is the popup"
+            ],
+            "coveredBy": [
+              "src/core/tabs.test.ts#selectPersistableUrl > prefers the active tab when it has a persistable URL",
+              "src/core/tabs.test.ts#selectPersistableUrl > falls back to a persistable tab when the active tab is the popup",
+              "src/core/tabs.test.ts#selectPersistableUrl > prefers the last-focused window over other windows",
+              "src/core/tabs.test.ts#selectPersistableUrl > returns undefined when no candidate is persistable",
+              "src/core/tabs.test.ts#selectPersistableUrl > prefers the active tab over an earlier tab in the last-focused window",
+              "src/core/tabs.test.ts#selectPersistableUrl > skips non-persistable tabs in the last-focused window",
+              "src/core/tabs.test.ts#selectPersistableUrl > falls back to any persistable tab, skipping non-persistable ones",
+              "src/core/tabs.test.ts#selectPersistableUrl > returns undefined for an empty list"
+            ]
+          },
+          {
+            "id": "5zuqzzf1xb",
+            "mutatorName": "BlockStatement",
+            "replacement": "{}",
+            "location": {
+              "start": { "line": 37, "column": 32 },
+              "end": { "line": 39, "column": 4 }
+            },
+            "status": "Survived",
+            "killedBy": [],
+            "coveredBy": [
+              "src/core/tabs.test.ts#selectPersistableUrl > prefers the active tab when it has a persistable URL",
+              "src/core/tabs.test.ts#selectPersistableUrl > prefers the active tab over an earlier tab in the last-focused window"
+            ]
+          },
+          {
+            "id": "18e4gph9vjs",
+            "mutatorName": "LogicalOperator",
+            "replacement": "(tab.lastFocusedWindow || usable(tab) !== undefined)",
+            "location": {
+              "start": { "line": 42, "column": 14 },
+              "end": { "line": 42, "column": 64 }
+            },
+            "status": "Survived",
+            "killedBy": [],
+            "coveredBy": [
+              "src/core/tabs.test.ts#selectPersistableUrl > falls back to a persistable tab when the active tab is the popup",
+              "src/core/tabs.test.ts#selectPersistableUrl > prefers the last-focused window over other windows",
+              "src/core/tabs.test.ts#selectPersistableUrl > returns undefined when no candidate is persistable",
+              "src/core/tabs.test.ts#selectPersistableUrl > skips non-persistable tabs in the last-focused window",
+              "src/core/tabs.test.ts#selectPersistableUrl > falls back to any persistable tab, skipping non-persistable ones"
+            ]
+          },
+          {
+            "id": "strzyhiu4g",
+            "mutatorName": "ConditionalExpression",
+            "replacement": "true",
+            "location": {
+              "start": { "line": 42, "column": 39 },
+              "end": { "line": 42, "column": 64 }
+            },
+            "status": "Survived",
+            "killedBy": [],
+            "coveredBy": [
+              "src/core/tabs.test.ts#selectPersistableUrl > falls back to a persistable tab when the active tab is the popup",
+              "src/core/tabs.test.ts#selectPersistableUrl > prefers the last-focused window over other windows",
+              "src/core/tabs.test.ts#selectPersistableUrl > skips non-persistable tabs in the last-focused window"
+            ]
+          },
+          {
+            "id": "1hzfnwizh8n",
+            "mutatorName": "EqualityOperator",
+            "replacement": "usable(tab) === undefined",
+            "location": {
+              "start": { "line": 42, "column": 39 },
+              "end": { "line": 42, "column": 64 }
+            },
+            "status": "Survived",
+            "killedBy": [],
+            "coveredBy": [
+              "src/core/tabs.test.ts#selectPersistableUrl > falls back to a persistable tab when the active tab is the popup",
+              "src/core/tabs.test.ts#selectPersistableUrl > prefers the last-focused window over other windows",
+              "src/core/tabs.test.ts#selectPersistableUrl > skips non-persistable tabs in the last-focused window"
+            ]
+          },
+          {
+            "id": "d9lrij95oz",
+            "mutatorName": "ConditionalExpression",
+            "replacement": "false",
+            "location": {
+              "start": { "line": 45, "column": 7 },
+              "end": { "line": 45, "column": 31 }
+            },
+            "status": "Survived",
+            "killedBy": [],
+            "coveredBy": [
+              "src/core/tabs.test.ts#selectPersistableUrl > falls back to a persistable tab when the active tab is the popup",
+              "src/core/tabs.test.ts#selectPersistableUrl > prefers the last-focused window over other windows",
+              "src/core/tabs.test.ts#selectPersistableUrl > returns undefined when no candidate is persistable",
+              "src/core/tabs.test.ts#selectPersistableUrl > skips non-persistable tabs in the last-focused window",
+              "src/core/tabs.test.ts#selectPersistableUrl > falls back to any persistable tab, skipping non-persistable ones",
+              "src/core/tabs.test.ts#selectPersistableUrl > returns undefined for an empty list"
+            ]
+          },
+          {
+            "id": "2575vuclhrs",
+            "mutatorName": "EqualityOperator",
+            "replacement": "focusedUrl === undefined",
+            "location": {
+              "start": { "line": 45, "column": 7 },
+              "end": { "line": 45, "column": 31 }
+            },
+            "status": "Killed",
+            "killedBy": [
+              "src/core/tabs.test.ts#selectPersistableUrl > falls back to any persistable tab, skipping non-persistable ones"
+            ],
+            "coveredBy": [
+              "src/core/tabs.test.ts#selectPersistableUrl > falls back to a persistable tab when the active tab is the popup",
+              "src/core/tabs.test.ts#selectPersistableUrl > prefers the last-focused window over other windows",
+              "src/core/tabs.test.ts#selectPersistableUrl > returns undefined when no candidate is persistable",
+              "src/core/tabs.test.ts#selectPersistableUrl > skips non-persistable tabs in the last-focused window",
+              "src/core/tabs.test.ts#selectPersistableUrl > falls back to any persistable tab, skipping non-persistable ones",
+              "src/core/tabs.test.ts#selectPersistableUrl > returns undefined for an empty list"
+            ]
+          },
+          {
+            "id": "kvpjevjjvc",
+            "mutatorName": "BlockStatement",
+            "replacement": "{}",
+            "location": {
+              "start": { "line": 45, "column": 33 },
+              "end": { "line": 47, "column": 4 }
+            },
+            "status": "Survived",
+            "killedBy": [],
+            "coveredBy": [
+              "src/core/tabs.test.ts#selectPersistableUrl > falls back to a persistable tab when the active tab is the popup",
+              "src/core/tabs.test.ts#selectPersistableUrl > prefers the last-focused window over other windows",
+              "src/core/tabs.test.ts#selectPersistableUrl > skips non-persistable tabs in the last-focused window"
+            ]
+          },
+          {
+            "id": "165cmxcwqpm",
+            "mutatorName": "EqualityOperator",
+            "replacement": "usable(tab) === undefined",
+            "location": {
+              "start": { "line": 49, "column": 37 },
+              "end": { "line": 49, "column": 62 }
+            },
+            "status": "Killed",
+            "killedBy": [
+              "src/core/tabs.test.ts#selectPersistableUrl > falls back to any persistable tab, skipping non-persistable ones"
+            ],
+            "coveredBy": [
+              "src/core/tabs.test.ts#selectPersistableUrl > returns undefined when no candidate is persistable",
+              "src/core/tabs.test.ts#selectPersistableUrl > falls back to any persistable tab, skipping non-persistable ones"
+            ]
+          }
+        ]
+      },
+      "src/core/url.ts": {
+        "language": "typescript",
+        "mutants": [
+          {
+            "id": "2ghr84lftiw",
+            "mutatorName": "ArrayDeclaration",
+            "replacement": "[]",
+            "location": {
+              "start": { "line": 3, "column": 29 },
+              "end": { "line": 3, "column": 48 }
+            },
+            "status": "Killed",
+            "killedBy": [
+              "src/core/tabs.test.ts#selectPersistableUrl > prefers the active tab when it has a persistable URL"
+            ],
+            "coveredBy": []
+          },
+          {
+            "id": "2ev5cco2y8y",
+            "mutatorName": "StringLiteral",
+            "replacement": "\"\"",
+            "location": {
+              "start": { "line": 3, "column": 30 },
+              "end": { "line": 3, "column": 37 }
+            },
+            "status": "Killed",
+            "killedBy": [
+              "src/core/saved-urls.test.ts#normalizeUrl > accepts http and https URLs and trims whitespace"
+            ],
+            "coveredBy": []
+          },
+          {
+            "id": "17nmvkd1gxj",
+            "mutatorName": "StringLiteral",
+            "replacement": "\"\"",
+            "location": {
+              "start": { "line": 3, "column": 39 },
+              "end": { "line": 3, "column": 47 }
+            },
+            "status": "Killed",
+            "killedBy": [
+              "src/core/tabs.test.ts#selectPersistableUrl > prefers the active tab when it has a persistable URL"
+            ],
+            "coveredBy": []
+          },
+          {
+            "id": "1nk43e86ajz",
+            "mutatorName": "StringLiteral",
+            "replacement": "\"\"",
+            "location": {
+              "start": { "line": 49, "column": 61 },
+              "end": { "line": 49, "column": 74 }
+            },
+            "status": "Killed",
+            "killedBy": [
+              "src/core/saved-urls.test.ts#normalizeUrl > rejects empty input with a typed error"
+            ],
+            "coveredBy": []
+          }
+        ]
+      }
+    }
+  },
+  "baseSnapshot": {
+    "format": 2,
+    "rows": [
+      ["1gfsysf9ilu", 6, 7, "2c45k4579l1", "Killed"],
+      ["1wu4qwvritv", 6, 7, "2c45k4579l1", "Killed"],
+      ["5zuqzzf1xb", 6, 7, "2c45k4579l1", "Killed"],
+      ["strzyhiu4g", 6, 9, "mu6v3ga3sh", "Killed"],
+      ["18e4gph9vjs", 6, 9, "mu6v3ga3sh", "Killed"],
+      ["d9lrij95oz", 6, 7, "2c45k4579l1", "Killed"],
+      ["1hzfnwizh8n", 6, 9, "mu6v3ga3sh", "Killed"],
+      ["2575vuclhrs", 6, 7, "2c45k4579l1", "Killed"],
+      ["kvpjevjjvc", 6, 7, "2c45k4579l1", "Killed"],
+      ["165cmxcwqpm", 6, 8, "hku08xazuk", "Killed"],
+      ["2ghr84lftiw", 0, 36, "1iykcvl3www", "Killed"],
+      ["17nmvkd1gxj", 0, 36, "1iykcvl3www", "Killed"],
+      ["2ev5cco2y8y", 0, 36, "1iykcvl3www", "Killed"],
+      ["1nk43e86ajz", 0, 2, "ctyikvcaj", "Killed"]
+    ]
+  },
+  "currentSnapshot": {
+    "format": 2,
+    "rows": [
+      ["1gfsysf9ilu", 24, 25, "2c45k4579l1", "Killed"],
+      ["1wu4qwvritv", 24, 25, "2c45k4579l1", "Killed"],
+      ["5zuqzzf1xb", 24, 25, "2c45k4579l1", "Killed"],
+      ["18e4gph9vjs", 24, 26, "mu6v3ga3sh", "Killed"],
+      ["strzyhiu4g", 24, 26, "mu6v3ga3sh", "Killed"],
+      ["1hzfnwizh8n", 24, 26, "mu6v3ga3sh", "Killed"],
+      ["d9lrij95oz", 24, 25, "2c45k4579l1", "Killed"],
+      ["2575vuclhrs", 24, 25, "2c45k4579l1", "Killed"],
+      ["kvpjevjjvc", 24, 25, "2c45k4579l1", "Killed"],
+      ["165cmxcwqpm", 24, 27, "hku08xazuk", "Killed"],
+      ["2ghr84lftiw", 28, 29, "1iykcvl3www", "Killed"],
+      ["2ev5cco2y8y", 28, 29, "1iykcvl3www", "Killed"],
+      ["17nmvkd1gxj", 28, 29, "1iykcvl3www", "Killed"],
+      ["1nk43e86ajz", 28, 33, "ctyikvcaj", "Killed"]
+    ]
+  },
+  "_note": "Excerpt of reports from scripts/mutation-diff.sh without --kill-matrix, after weakening src/core/tabs.test.ts. The baseline snapshot and report were edited to add an unchanged test (messages.test.ts) as a killer of the mutants tabs.test.ts killed, as an unrelated test that failed by chance under load would be. mutator then reused the baseline Killed and reported no regression; rerun is the first mutator --only run."
+}
