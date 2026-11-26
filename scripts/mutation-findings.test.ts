@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   decodeReport,
@@ -8,15 +9,26 @@ import {
 } from "./mutation-findings.ts";
 
 const REGRESSION_ADVICE =
-  "今はどのテストも検出しません。弱めたアサーションや消したテストを戻すか、同じ振る舞いを確かめるテストを足してください。";
+  "今はどのテストも検出しません。mutator acceptで通さないでください。弱めたアサーションや消したテストを戻すか、同じ振る舞いを確かめるテストを足してください。";
+
+const GAP_ADVICE =
+  "どのテストも検出しません。テストが足りないのか、コードが要らないのかを見直してください。どんな入力でも振る舞いが変わらない等価ミュータントだけをmutator acceptで記録します。手順はnode_modules/@mizchi/mutator/skills/mutation-test-loop/SKILL.mdにあります。";
 
 const report = (value: unknown): MutationReport => {
   const decoded = decodeReport(value);
-  if (decoded === undefined) {
-    throw new Error("fixture is not a report");
+  if ("problem" in decoded) {
+    throw new Error(`fixture is not a report: ${decoded.problem}`);
   }
-  return decoded;
+  return decoded.report;
 };
+
+/** An excerpt of a report that mutator 0.4.5 wrote. */
+const fixture = (name: string): MutationReport =>
+  report(
+    JSON.parse(
+      readFileSync(new URL(`./fixtures/${name}`, import.meta.url), "utf8"),
+    ),
+  );
 
 const files = {
   "src/core/tabs.ts": {
@@ -38,16 +50,39 @@ const files = {
   },
 };
 
+const base = { schemaVersion: "2", comparison: "available", files } as const;
+
 describe("reviewFindings", () => {
-  it("fails with an error on the mutant's line for a detection regression", () => {
+  it("fails on a detection regression in a report from mutator 0.4.5", () => {
+    expect(reviewFindings(fixture("mutator-0.4.5-regression.json"))).toEqual({
+      lines: [
+        `::error file=src/core/tabs.ts,line=37,title=テストが弱くなった::変わっていないコードのミュータント1gfsysf9ilu（ConditionalExpressionでfalseに置き換え）を、前は「src/core/tabs.test.ts#selectPersistableUrl > prefers the active tab over an earlier tab in the last-focused window」が検出していましたが、${REGRESSION_ADVICE}`,
+        `::warning file=src/core/tabs.ts,line=31,title=テストが検出できないミュータント::ミュータント1j1pdhef46w（FnValueで{ return ""; }に置き換え）は、${GAP_ADVICE}`,
+        "テストが弱くなった箇所: 1件、何も検出しない新しいテスト: 0件、テストが検出できないミュータント: 1件",
+      ],
+      exitCode: 1,
+    });
+  });
+
+  it("warns on the test file about a new test that detects nothing in a report from mutator 0.4.5", () => {
+    expect(
+      reviewFindings(fixture("mutator-0.4.5-new-test-no-kills.json")),
+    ).toEqual({
+      lines: [
+        "::warning file=src/core/tabs.test.ts,title=何も検出しない新しいテスト::src/core/tabs.test.ts#selectPersistableUrl (no assertions) > only calls itは、測ったミュータントを1つも検出しません。アサーションを確かめてください。",
+        "テストが弱くなった箇所: 0件、何も検出しない新しいテスト: 1件、テストが検出できないミュータント: 0件",
+      ],
+      exitCode: 0,
+    });
+  });
+
+  it("lists every previous killer of a regressed mutant", () => {
     const review = reviewFindings(
       report({
-        comparison: "available",
+        ...base,
         findings: [
-          { kind: "mutationGap", severity: "warning", key: "other" },
           {
             kind: "detectionRegression",
-            severity: "warning",
             key: "weak",
             previousKillers: [
               "src/core/tabs.test.ts#a",
@@ -55,30 +90,24 @@ describe("reviewFindings", () => {
             ],
           },
         ],
-        files,
       }),
-      "mutation.json",
     );
-    expect(review).toEqual({
-      lines: [
-        `::error file=src/core/tabs.ts,line=12,title=テストが弱くなった::変わっていないコードのミュータントweak（EqualityOperatorでa === bに置き換え）を、前は「src/core/tabs.test.ts#a」、「src/core/tabs.test.ts#b」が検出していましたが、${REGRESSION_ADVICE}`,
-        "テストが弱くなった箇所: 1件、何も検出しない新しいテスト: 0件",
-        "テストが検出できなかったミュータント: 1件。テストが足りないのか、コードが要らないのかを見直してください。手順はnode_modules/@mizchi/mutator/skills/mutation-test-loop/SKILL.mdにあります。",
-      ],
-      exitCode: 1,
-    });
+    expect(review.lines[0]).toBe(
+      `::error file=src/core/tabs.ts,line=12,title=テストが弱くなった::変わっていないコードのミュータントweak（EqualityOperatorでa === bに置き換え）を、前は「src/core/tabs.test.ts#a」、「src/core/tabs.test.ts#b」が検出していましたが、${REGRESSION_ADVICE}`,
+    );
+    expect(review.exitCode).toBe(1);
   });
 
   it("fails without a file or line when the mutant cannot be located", () => {
     const review = reviewFindings(
       report({
+        ...base,
         findings: [
           { kind: "detectionRegression", key: "gone", previousKillers: [] },
           { kind: "detectionRegression", key: "bare" },
         ],
         files: { "src/core/url.ts": { mutants: [{ id: "bare" }] } },
       }),
-      "mutation.json",
     );
     expect(review.lines.slice(0, 2)).toEqual([
       `::error title=テストが弱くなった::変わっていないコードのミュータントgoneを、前はテストが検出していましたが、${REGRESSION_ADVICE}`,
@@ -87,76 +116,94 @@ describe("reviewFindings", () => {
     expect(review.exitCode).toBe(1);
   });
 
-  it("only warns about a new test that detects nothing", () => {
+  it("warns without a file about a new test whose id has no file", () => {
     expect(
       reviewFindings(
         report({
-          comparison: "available",
-          findings: [
-            {
-              kind: "newTestNoKills",
-              test: "src/core/tabs.test.ts#calls only",
-              measured: 3,
-            },
-            { kind: "testNotMeasured", test: "src/core/tabs.test.ts#other" },
-          ],
-          files,
+          ...base,
+          findings: [{ kind: "newTestNoKills", test: "#bare" }],
         }),
-        "mutation.json",
-      ),
-    ).toEqual({
-      lines: [
-        "::warning title=何も検出しない新しいテスト::src/core/tabs.test.ts#calls onlyは、測ったミュータントを1つも検出しません。アサーションを確かめてください。",
-        "テストが弱くなった箇所: 0件、何も検出しない新しいテスト: 1件",
-      ],
-      exitCode: 0,
-    });
+      ).lines[0],
+    ).toBe(
+      "::warning title=何も検出しない新しいテスト::#bareは、測ったミュータントを1つも検出しません。アサーションを確かめてください。",
+    );
   });
 
-  it("passes with a notice when there was nothing to compare with", () => {
+  it("passes when nothing got weaker", () => {
     expect(
       reviewFindings(
-        report({ comparison: "unavailable", findings: [] }),
-        "mutation.json",
+        report({
+          ...base,
+          findings: [
+            { kind: "testNotMeasured", test: "src/core/tabs.test.ts#other" },
+          ],
+        }),
       ),
     ).toEqual({
       lines: [
-        "::notice title=比較の基準が無い::前回の結果が無いか、依存、ロックファイル、tsconfig.json、Node.jsの版、mutatorの設定のどれかが変わったため、テストが弱くなったかは確かめていません。",
-        "テストが弱くなった箇所: 0件、何も検出しない新しいテスト: 0件",
+        "テストが弱くなった箇所: 0件、何も検出しない新しいテスト: 0件、テストが検出できないミュータント: 0件",
       ],
       exitCode: 0,
     });
   });
 
-  it("fails when the report is missing", () => {
-    expect(reviewFindings(undefined, ".mutator/report/mutation.json")).toEqual({
-      lines: [
-        "::error title=ミューテーションテストの結果が無い::.mutator/report/mutation.jsonがありません。先にmutatorをjsonのreporterで実行してください。",
-      ],
-      exitCode: 1,
-    });
+  it("fails when there was no baseline to compare with", () => {
+    const review = reviewFindings(
+      report({ ...base, comparison: "unavailable", findings: [] }),
+    );
+    expect(review.exitCode).toBe(1);
+    expect(review.lines).toHaveLength(1);
+    expect(review.lines[0]).toMatch(
+      /^::error title=比べる基準を使えなかった::/,
+    );
   });
 });
 
 describe("decodeReport", () => {
-  it("rejects a value that is not an object", () => {
-    expect(decodeReport([])).toBeUndefined();
-    expect(decodeReport(null)).toBeUndefined();
+  it.each([
+    [[], "JSONのオブジェクトではありません。"],
+    [null, "JSONのオブジェクトではありません。"],
+    [
+      { findings: [], files: {} },
+      "schemaVersionがありません。このスクリプトは2だけを読みます。",
+    ],
+    [
+      { schemaVersion: "3", comparison: "available", findings: [], files: {} },
+      'schemaVersionが"3"です。このスクリプトは2だけを読みます。',
+    ],
+    [
+      { schemaVersion: "2", findings: [], files: {} },
+      "comparisonがありません。",
+    ],
+    [
+      { schemaVersion: "2", comparison: "available", files: {} },
+      "findingsの配列がありません。",
+    ],
+    [
+      { schemaVersion: "2", comparison: "available", findings: [] },
+      "filesのオブジェクトがありません。",
+    ],
+  ])("rejects %j", (value, problem) => {
+    expect(decodeReport(value)).toEqual({ problem });
   });
 
   it("drops entries of an unknown shape", () => {
     expect(
       decodeReport({
-        comparison: 1,
+        schemaVersion: "2",
+        comparison: "available",
         findings: [{ key: "no kind" }, "text"],
         files: { "a.ts": { mutants: [{ mutatorName: "no id" }] }, "b.ts": 1 },
       }),
     ).toEqual({
-      findings: [],
-      files: new Map([
-        ["a.ts", []],
-        ["b.ts", []],
-      ]),
+      report: {
+        comparison: "available",
+        findings: [],
+        files: new Map([
+          ["a.ts", []],
+          ["b.ts", []],
+        ]),
+      },
     });
   });
 });

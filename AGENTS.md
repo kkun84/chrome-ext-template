@@ -95,15 +95,20 @@ entrypoints  →  layers / services  →  core
   `chrome.*`、`browser.*`、`globalThis.chrome`）を検出する。`fallow audit`の
   `added-suppression`は`error`（新規の抑制コメントを拒否）。
 - **mutator**（`mutator.config.json`）: `src/core` / `src/services`のミュータントを実行する。
-  失敗にするのは、テストを弱めた変更だけ。変わっていないコードのミュータントを前の結果では
-  テストが検出していたのに、今はどのテストも検出しない場合を指す（mutatorの`detectionRegression`）。
-  判定は`scripts/mutation-findings.ts`（純関数）と`scripts/check-mutation-findings.ts`
-  （`pnpm mutation:findings`。`.mutator/report/mutation.json`を読む）が行う。何も検出しない新しい
-  テスト（`newTestNoKills`）は警告、検出できないミュータントと全件のスコアは表示だけ。
-  `pnpm check`（とpre-push）は`pnpm mutation:diff`で`origin/main`との差分と、変更したテストが
-  確かめるコードを`--include-test-changes`付きで実行し、判定まで行う。比べる基準は手元の`.mutator`の
-  前回の結果で、無ければ`pnpm mutation`で作る。CIの`mutation`ジョブは、`main`へのpushで全件を
-  実行して結果をartifactに保存し、PRではそれを基準に判定する（マージに必須のチェック）。
+  失敗にするのは、テストを弱めた変更。変わっていないコードのミュータントを基準ではテストが
+  検出していたのに、今はどのテストも検出しない場合を指す（mutatorの`detectionRegression`）。
+  `scripts/mutation-diff.sh`（`pnpm mutation:diff`）が、`git merge-base <base> HEAD`を一時的なworktreeに
+  取り出し、今の作業ツリーの環境ファイル（`package.json`、`pnpm-lock.yaml`、`pnpm-workspace.yaml`、
+  `.npmrc`、`tsconfig*.json`、`vitest.config.*`、`mutator.config.*`）を上書きして全件を実行し、
+  その結果を基準にする。前回の`.mutator`は使わない。続けて差分と変更したテストの分を
+  `--include-test-changes --kill-matrix`付きで実行し、`scripts/mutation-findings.ts`（純関数）と
+  `scripts/check-mutation-findings.ts`（`pnpm mutation:findings`）が判定する。基準と比べられなかった
+  レポート（`comparison: "unavailable"`）や、形の違うレポートも失敗にする。基準を作れない時
+  （ベースのテストが今の依存で落ちる、など）は警告だけ。何も検出しない新しいテスト（`newTestNoKills`）と
+  検出できないミュータントは警告、全件のスコアは表示だけ。`pnpm check`（とpre-push）は`origin/main`を
+  基準にし、無ければ飛ばす。CIの`mutation`ジョブはPRで同じスクリプトをベースブランチに対して実行する
+  （マージに必須のチェック）。所要時間は20秒ほど。Vitestに`setupFiles` / `globalSetup`を足したら、
+  そのファイルも環境ハッシュに入るので`scripts/mutation-diff.sh`が写すファイルに足す。
   `src/core` / `src/services`を変えたら、`pnpm mutation:diff`の結果を見直す。検出できないミュータントは、
   テストが足りないのか、コードが要らないのかを判断する。テストを足すときは、呼び出す側から見える
   振る舞いを確かめる。ミュータントを落とすためだけに実装をなぞるテストは書かない。手順は
@@ -148,7 +153,7 @@ pnpm test:e2e      # ビルド + Playwright
 pnpm fallow        # fallow（デッドコード / 循環依存 / 重複 / ヘルス / 境界）
 pnpm fallow:audit  # origin/main 基準の差分監査（新規のみ）
 pnpm mutation      # ミューテーションテスト（全件。レポートは .mutator/report）
-pnpm mutation:diff # origin/main との差分と変更したテストの分を実行し、テストを弱めた変更なら失敗
+pnpm mutation:diff # origin/main との共通の祖先で基準を作り、差分と変更したテストの分を実行して、テストを弱めた変更なら失敗
 pnpm mutation:findings # 直前の結果からテストを弱めた変更を判定（基準のrefを渡すと設定の変更も警告）
 pnpm check         # lint + typecheck + test + fallow + mutation:diff
 pnpm check:all     # check + coverage + build + e2e + dedupe
@@ -174,8 +179,10 @@ pnpm settings:apply # GitHub 設定を適用
 `pnpm lint`（`biome ci`）に加えて`pnpm dedupe:check`を実行し、`pnpm audit`は週1回の定期実行の
 `audit`ジョブだけが実行します（PRで増える依存は`dependency-review`が検査します）。
 `nix`ジョブは`nix flake check`とdevShellのrealizeの後に
-`shellcheck scripts/*.sh && actionlint`を実行します。artifact
-（カバレッジ・拡張のunpacked/zip・失敗時のPlaywright trace/screenshot）は
+`shellcheck scripts/*.sh && actionlint`を実行します。`mutation`ジョブは、PRで
+`scripts/mutation-diff.sh`を実行し（基準はその場で作り、artifactは使わない）、全件のスコアを
+ジョブの概要に出します。artifact（`coverage`、`chrome-mv3-unpacked` / `chrome-mv3-zip`、
+失敗時だけ`playwright-test-results`（trace / screenshot）と`playwright-report`）は
 Actions実行ページのArtifactsから取得できます。
 `.github/workflows/verify-lockfile.yml`が`actions.lock`の整合性を検証します
 （`ci.yml` / `codeql.yml` / `dependency-review.yml` / `verify-lockfile.yml`を含む）。

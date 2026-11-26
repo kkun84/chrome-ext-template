@@ -153,7 +153,7 @@ Nix外でローカル検証する場合のみ`CHROME_PATH=/usr/bin/google-chrome
 | -------------------- | -------------------------------------------------------------------- |
 | `lint`               | `pnpm lint`（`biome ci` + `rumdl check` + ja-space + pnpm-policy + no-suppress）。続けて`pnpm dedupe:check`を実行 |
 | `audit (weekly)`     | `pnpm run audit`。週1回の定期実行のときだけ動く（PRでは動かない） |
-| `mutation`           | ミューテーションテスト。PRでは`main`の結果と比べ、テストを弱めた変更なら失敗する。変更した行の検出漏れと、何も検出しない新しいテストは警告にする。全件のスコアをジョブの概要（Summary）に出す。`main`へのpushでは全件の結果をartifact `mutator-results`に保存する |
+| `mutation`           | ミューテーションテスト。PRでは、ベースブランチとの共通の祖先で全件を実行した結果を基準にして、テストを弱めた変更なら失敗する。変更した行の検出漏れと、何も検出しない新しいテストは警告にする。全件のスコアをジョブの概要（Summary）に出す |
 | `fallow`             | `pnpm fallow`（デッドコード / 循環依存 / 重複 / ヘルス / 境界）。PRでは`fallow audit --gate new-only`も実行 |
 | `typecheck`          | `pnpm typecheck`（`wxt prepare && tsc --noEmit`）                    |
 | `test`               | `pnpm test:coverage` → カバレッジartifact `coverage`                |
@@ -250,36 +250,53 @@ pnpm fallow:audit    # origin/main 基準の差分監査（新規の問題のみ
 
 ```bash
 pnpm mutation          # 全件を実行。レポートは .mutator/report/index.html
-pnpm mutation:diff     # origin/main との差分と、変更したテストが確かめるコードのミュータントを実行し、続けて mutation:findings で判定
+pnpm mutation:diff     # origin/main との共通の祖先で基準を作り、差分と変更したテストが確かめるコードのミュータントを実行して判定
 pnpm mutation:findings # 直前の結果（.mutator/report/mutation.json）から、テストを弱めた変更を判定
 ```
 
-失敗にするのは、テストを弱めた変更だけです。変わっていないコードのミュータントを、前の結果では
-テストが検出していたのに、今はどのテストも検出しない場合を指します（mutatorの`detectionRegression`）。
-アサーションを弱めたり、テストを消したりした変更がこれに当たります。それ以外は失敗にしません。
+失敗にするのは、テストを弱めた変更です。変わっていないコードのミュータントを、基準ではテストが
+検出していたのに、今はどのテストも検出しない場合を指します（mutatorの`detectionRegression`）。
+アサーションを弱めたり、テストを消したりした変更がこれに当たります。
 
-- 何も検出しない新しいテスト（`newTestNoKills`）は警告にします。
-- 検出できないミュータント（生き残りと、どのテストも届かないもの）は表示だけです。全件のスコアも表示だけです。
-- 比べる前の結果が無い時は、その旨を表示して失敗にしません。依存、ロックファイル、`tsconfig.json`、
-  Node.jsの版、mutatorの設定のどれかが変わった時も、前の結果とは比べられません。
+- 何も検出しない新しいテスト（`newTestNoKills`）と、検出できないミュータント（生き残りと、どのテストも
+  届かないもの）は警告にします。全件のスコアは表示だけです。
 - テストが元々落ちている場合も失敗します。
 
 テストを弱めた変更と判定されたら、弱めたアサーションや消したテストを戻すか、同じ振る舞いを確かめる
 テストを足します。`mutator accept`で通してはいけません。`mutator.accepted.json`は等価ミュータント専用です。
 
+### 比べる基準の作り方
+
+`pnpm mutation:diff`（`scripts/mutation-diff.sh`）は、前回の実行結果を使わず、毎回その場で基準を作ります。
+
+1. `git merge-base origin/main HEAD`のコミットを、一時ディレクトリに`git worktree add --detach`で取り出す。
+2. そこへ今の作業ツリーの`package.json`、`pnpm-lock.yaml`、`pnpm-workspace.yaml`、`.npmrc`、
+   `tsconfig*.json`、`vitest.config.*`、`mutator.config.*`を上書きする。mutatorは、Node.jsの版、
+   mutatorの設定、これらのファイルの中身から作る環境ハッシュが一致する時だけ、基準と比べるため。
+3. `pnpm install --frozen-lockfile --offline --ignore-scripts`と`wxt prepare`の後、全件を実行する。
+4. 作業ツリーの`.mutator`を捨てて基準のsnapshotに置き換え、
+   `mutator --since <共通の祖先> --include-test-changes --kill-matrix`で差分と、変更したテストが確かめる
+   コードのミュータントを実行し、`scripts/check-mutation-findings.ts`で判定する。worktreeは最後に消す。
+
+- 基準を作れない時（ベースのテストが今の依存で落ちる、など）は、理由を警告に出して失敗にしません。
+- 基準を作ったのにmutatorが比べられなかった（レポートの`comparison`が`unavailable`）時は、仕組みの故障として
+  失敗にします。Vitestに`setupFiles` / `globalSetup`を足すと、そのファイルも環境ハッシュに入るので、
+  `scripts/mutation-diff.sh`が写すファイルに足してください。
+- レポートが壊れている、形が違う（`schemaVersion`が`2`でない、`findings` / `comparison`が無い）、
+  基準のrefが無い時も失敗にします。
+- 所要時間は、このテンプレートで20秒ほどです（基準の全件が大半）。`--kill-matrix`の分は数秒です。
+
+実行する場所ごとの違いは次のとおりです。
+
 - **手元**: `pnpm check`の最後で`pnpm mutation:diff`を実行します。pre-pushも`pnpm check`なので、
-  テストを弱めた変更ならpushが止まります。比べる基準は、手元の`.mutator`にある前回の結果です。
-  基準を作るには、テストを弱める前に`pnpm mutation`で全件を実行しておきます（cloneの直後や、
-  依存を変えた後など）。`origin/main`が無い環境（`.git`の無い展開先や浅いclone）では、
-  その旨を表示して何もしません。
-- **CI**: `mutation`ジョブは、`main`へのpushで全件を実行し、`.mutator`をartifact `mutator-results`
-  として保存します。PRでは、ベースブランチの最新の`mutator-results`を復元し、
-  `mutator --since origin/<base> --include-test-changes --kill-matrix`で変更した行と、変更したテストが
-  確かめるコードのミュータントを実行します。検出できなかったものはPRの差分に警告として表示します。
-  続けて`pnpm mutation:findings origin/<base>`で判定し、テストを弱めた変更ならジョブを失敗にします。
-  `mutator.config.*` / `mutator.accepted.json`を変えたPRには警告を出します。最後に全件を実行し、
-  全体のスコアをジョブの概要に出します。`.github/settings/ruleset-main.json`は、`mutation`を
-  マージに必須のチェックにしています。
+  テストを弱めた変更ならpushが止まります。`origin/main`が無い環境（`.git`の無い展開先や
+  `origin`の無いclone）では、その旨を表示して何もしません。基準の`pnpm install`はオフラインなので、
+  先に作業ツリーで`pnpm install`を済ませておきます。
+- **CI**: `mutation`ジョブは、PRで`scripts/mutation-diff.sh --kill-matrix origin/<base>`を実行します。
+  ベースブランチが`main`以外でも、共通の祖先を基準にします。`mutator.config.*` /
+  `mutator.accepted.json`を変えたPRには警告を出します。続けて、判定が失敗しても全件を実行し、
+  全体のスコアをジョブの概要に出します。pushと週1回の定期実行では全件だけを実行します。
+  `.github/settings/ruleset-main.json`は、`mutation`をマージに必須のチェックにしています。
 - `pnpm mutation` / `pnpm mutation:diff`を単独で実行する前に、`pnpm typecheck`（または
   `pnpm exec wxt prepare`）で`.wxt/`を作っておきます。`pnpm test`と同じ前提です。
 - 検出できなかったミュータントは、テストが足りないのか、コードが要らないのかを考えます。
@@ -297,7 +314,8 @@ pnpm mutation:findings # 直前の結果（.mutator/report/mutation.json）か�
 
 1. `package.json`の`mutation` / `mutation:diff` / `mutation:findings`スクリプト、`check`の
    `&& pnpm mutation:diff`、`clean`の`.mutator`
-2. `scripts/mutation-findings.ts` / `scripts/check-mutation-findings.ts`とそのテスト
+2. `scripts/mutation-diff.sh`、`scripts/mutation-findings.ts` / `scripts/check-mutation-findings.ts`とそのテスト、
+   `scripts/fixtures/mutator-*.json`
 3. `mutator.config.json`と`mutator.accepted.json`
 4. devDependencyの`@mizchi/mutator`（`pnpm remove @mizchi/mutator`）
 5. `.github/workflows/ci.yml`の`mutation`ジョブと、`.github/settings/ruleset-main.json`の
@@ -413,8 +431,8 @@ Markdownは[rumdl](https://github.com/rvben/rumdl) 0.3.2で検査します（`pn
 | `pnpm fallow`     | fallowでデッドコード / 循環依存 / 重複 / ヘルス / 境界を解析 |
 | `pnpm fallow:audit` | `origin/main`を基準にしたfallow監査（新規のみ） |
 | `pnpm mutation`   | ミューテーションテスト（`src/core` / `src/services`の全件。結果を表示するだけ） |
-| `pnpm mutation:diff` | `origin/main`との差分と、変更したテストが確かめるコードのミュータントを実行し、`mutation:findings`で判定。テストを弱めた変更なら失敗する |
-| `pnpm mutation:findings` | 直前の結果から、テストを弱めた変更（失敗）と何も検出しない新しいテスト（警告）をGitHub Actionsの注釈の形で出す。基準のref（例: `origin/main`）を渡すと、`mutator.config.*` / `mutator.accepted.json`の変更も警告する |
+| `pnpm mutation:diff` | `origin/main`との共通の祖先で全件を実行して基準を作り、差分と変更したテストが確かめるコードのミュータントを実行して判定。テストを弱めた変更なら失敗する（`scripts/mutation-diff.sh`） |
+| `pnpm mutation:findings` | 直前の結果から、テストを弱めた変更と基準と比べられなかった結果（失敗）、何も検出しない新しいテストと検出できないミュータント（警告）をGitHub Actionsの注釈の形で出す。基準のref（例: `origin/main`）を渡すと、`mutator.config.*` / `mutator.accepted.json`の変更も警告する |
 | `pnpm check`      | `lint` + `typecheck` + `test` + `fallow` + `mutation:diff` |
 | `pnpm check:all`  | `check` + `test:coverage` + `build` + `test:e2e` + `dedupe:check` |
 | `pnpm clean`      | 生成物（`.output` / `.wxt` / `coverage`等）を削除 |

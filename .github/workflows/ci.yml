@@ -173,18 +173,12 @@ jobs:
   mutation:
     name: mutation
     runs-on: ubuntu-latest
-    permissions:
-      # Job-level permissions replace the workflow defaults, so keep
-      # contents: read (checkout) and add actions: write (the results
-      # artifact on main; reading it on a pull request needs actions: read).
-      contents: read
-      actions: write
     steps:
       - name: Checkout
         uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
-          # The pull request steps diff against the base branch.
+          # The baseline is the merge base with the base branch.
           fetch-depth: 0
       - name: Set up pnpm
         uses: pnpm/action-setup@v6.1.0
@@ -197,48 +191,27 @@ jobs:
         run: pnpm install --frozen-lockfile
       # Vitest needs .wxt/tsconfig.json (see the test job).
       - name: Prepare WXT
+        id: prepare
         run: pnpm exec wxt prepare
-      # The last full run on the base branch is the baseline that tells
-      # whether a pull request weakened the tests. Pushes to main upload it as
-      # the `mutator-results` artifact (see the last step). It is fetched with
-      # the preinstalled gh CLI and the REST API instead of a cache action,
-      # which keeps the actions in this workflow, and so actions.lock,
-      # unchanged. Only artifacts uploaded by this repository are used.
-      - name: Restore the base branch results
-        if: github.event_name == 'pull_request'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          artifact_id=$(gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts?name=mutator-results&per_page=100" \
-            --jq '[.artifacts[] | select(.expired | not) | select(.workflow_run.head_branch == env.GITHUB_BASE_REF) | select(.workflow_run.head_repository_id == .workflow_run.repository_id)][0].id // empty')
-          if [ -z "$artifact_id" ]; then
-            echo "::notice title=ミューテーションテストの基準が無い::${GITHUB_BASE_REF}の結果のartifactがありません。"
-            exit 0
-          fi
-          gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}/zip" > "$RUNNER_TEMP/mutator-results.zip"
-          mkdir -p .mutator
-          unzip -q "$RUNNER_TEMP/mutator-results.zip" -d .mutator
-      # Mutants on changed lines and mutants that changed tests cover. Those
-      # no test detects (including code no test reaches) become warning
-      # annotations on the diff; they do not fail the job. --kill-matrix
-      # measures each new test so that one detecting nothing is reported.
-      - name: Mutation tests (changed lines and tests)
-        if: github.event_name == 'pull_request'
-        run: pnpm exec mutator --since "origin/${GITHUB_BASE_REF}" --include-test-changes --kill-matrix
-      # Fails when a test detected a mutant of unchanged code on the base
-      # branch and no test detects it now: the change weakened or removed a
-      # test. A new test that detects nothing and a changed mutator.config.* /
-      # mutator.accepted.json are warnings.
+      # scripts/mutation-diff.sh runs every mutant at the merge base with the
+      # base branch, with this checkout's dependencies, as the baseline. Then
+      # it runs the mutants on changed lines and those changed tests cover,
+      # and fails when a test detected a mutant of unchanged code at the base
+      # and no test detects it now: the change weakened or removed a test.
+      # Undetected mutants, a new test that detects nothing (--kill-matrix)
+      # and a changed mutator.config.* / mutator.accepted.json are warnings.
+      # Same script as `pnpm mutation:diff` in `pnpm check` and pre-push.
       - name: Tests weakened by the change
-        id: findings
         if: github.event_name == 'pull_request'
-        run: pnpm mutation:findings "origin/${GITHUB_BASE_REF}"
-      # Every mutant, for the overall score, written to the job summary. It
-      # also runs when only the step above failed, so the score is shown then.
-      # Annotations are left to the steps above, so GITHUB_ACTIONS is cleared.
+        run: bash scripts/mutation-diff.sh --kill-matrix "origin/${GITHUB_BASE_REF}"
+      # Every mutant of this commit, for the overall score, written to the job
+      # summary. It starts from an empty .mutator so the score does not reuse
+      # the baseline, and it also runs when the step above failed. Annotations
+      # are left to the step above, so GITHUB_ACTIONS is cleared.
       - name: Mutation tests (all)
-        if: success() || steps.findings.conclusion == 'failure'
+        if: ${{ !cancelled() && steps.prepare.conclusion == 'success' }}
         run: |
+          rm -rf .mutator
           GITHUB_ACTIONS='' pnpm mutation | tee "$RUNNER_TEMP/mutation.txt"
           {
             echo "### ミューテーションテスト（全件）"
@@ -246,17 +219,6 @@ jobs:
             grep -E '^(mutants|Killed|score)' "$RUNNER_TEMP/mutation.txt" || true
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
-      # The baseline for later pull requests (see the restore step).
-      - name: Upload the results for pull requests
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: actions/upload-artifact@v7.0.2
-        with:
-          name: mutator-results
-          path: .mutator/
-          # `.mutator` is hidden. upload-artifact skips hidden paths unless
-          # this is set.
-          include-hidden-files: true
-          if-no-files-found: error
 
   build:
     name: build

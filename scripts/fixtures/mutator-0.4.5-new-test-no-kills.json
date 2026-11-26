@@ -1,0 +1,45 @@
+{
+  "schemaVersion": "2",
+  "comparison": "available",
+  "findings": [
+    {
+      "kind": "newTestNoKills",
+      "severity": "warning",
+      "test": "src/core/tabs.test.ts#selectPersistableUrl (no assertions) > only calls it",
+      "measured": 6,
+      "message": "New test detects none of the measured mutants; review its assertions and the enabled mutation rules."
+    }
+  ],
+  "testChanges": {
+    "added": [
+      "src/core/tabs.test.ts#selectPersistableUrl (no assertions) > only calls it"
+    ],
+    "changed": [
+      "src/core/tabs.test.ts#selectPersistableUrl > falls back to a persistable tab when the active tab is the popup",
+      "src/core/tabs.test.ts#selectPersistableUrl > falls back to any persistable tab, skipping non-persistable ones"
+    ],
+    "removed": []
+  },
+  "thresholds": { "high": 80, "low": 60 },
+  "projectRoot": "/repo",
+  "framework": { "name": "mutator", "version": "0.4.5" },
+  "files": {},
+  "killMatrix": {
+    "mutants": { "full": 10, "timeout": 0, "incomplete": 70 },
+    "tests": 45,
+    "noKills": [
+      "src/core/tabs.test.ts#selectPersistableUrl (no assertions) > only calls it"
+    ],
+    "subsumed": [],
+    "duplicates": [],
+    "observations": [
+      {
+        "test": "src/core/tabs.test.ts#selectPersistableUrl (no assertions) > only calls it",
+        "status": "noKills",
+        "kills": 0,
+        "measured": 6,
+        "incomplete": 0
+      }
+    ]
+  }
+}

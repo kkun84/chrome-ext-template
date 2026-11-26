@@ -9,10 +9,11 @@
  * Reads `.mutator/report/mutation.json` from the last mutator run and prints
  * GitHub Actions annotations: an error for each mutant the tests detected
  * before and no longer detect, a warning for each new test that detects
- * nothing, and a notice when there was no previous result to compare with.
- * With a base ref (e.g. `origin/main`) it also warns about changed
- * `mutator.config.*` / `mutator.accepted.json` since that ref. Exits 1 when
- * the tests got weaker or the report is missing.
+ * nothing and for each mutant no test detects. With a base ref (e.g.
+ * `origin/main`) it also warns about changed `mutator.config.*` /
+ * `mutator.accepted.json` since that ref. Exits 1 when the tests got weaker,
+ * when mutator had no baseline to compare with, or when the report or the ref
+ * cannot be read. `scripts/mutation-diff.sh` makes the baseline and runs this.
  */
 
 import { execFileSync } from "node:child_process";
@@ -21,7 +22,8 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   decodeReport,
-  type MutationReport,
+  failure,
+  type Review,
   reviewFindings,
   reviewSettingChanges,
 } from "./mutation-findings.ts";
@@ -35,26 +37,59 @@ const REPORT_PATH = ".mutator/report/mutation.json";
 const isMissing = (error: unknown): boolean =>
   error instanceof Error && "code" in error && error.code === "ENOENT";
 
-const loadReport = (root: string): MutationReport | undefined => {
+const reasonOf = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
+
+const reviewReport = (root: string): Review => {
   let text: string;
   try {
     text = readFileSync(join(root, REPORT_PATH), "utf8");
   } catch (error) {
-    if (isMissing(error)) {
-      return undefined;
-    }
-    throw error;
+    return isMissing(error)
+      ? failure(
+          "ミューテーションテストの結果が無い",
+          `${REPORT_PATH}がありません。先にpnpm mutation:diffを実行してください。`,
+        )
+      : failure(
+          "ミューテーションテストの結果を読めない",
+          `${REPORT_PATH}を読めません: ${reasonOf(error)}`,
+        );
   }
-  return decodeReport(JSON.parse(text));
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch (error) {
+    return failure(
+      "ミューテーションテストの結果を読めない",
+      `${REPORT_PATH}がJSONとして読めません: ${reasonOf(error)}`,
+    );
+  }
+  const decoded = decodeReport(value);
+  return "problem" in decoded
+    ? failure(
+        "ミューテーションテストの結果の形が違う",
+        `${REPORT_PATH}は想定したmutator 0.4のレポートではありません: ${decoded.problem}`,
+      )
+    : reviewFindings(decoded.report);
 };
 
-const changedFiles = (root: string, base: string): readonly string[] =>
-  execFileSync("git", ["diff", "--name-only", `${base}...HEAD`], {
-    cwd: root,
-    encoding: "utf8",
-  })
-    .split("\n")
-    .filter((file) => file.length > 0);
+const changedFiles = (
+  root: string,
+  base: string,
+): { readonly files: readonly string[] } | { readonly problem: string } => {
+  try {
+    const output = execFileSync(
+      "git",
+      ["diff", "--name-only", `${base}...HEAD`],
+      { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+    );
+    return { files: output.split("\n").filter((file) => file.length > 0) };
+  } catch (error) {
+    const stderr =
+      error instanceof Error && "stderr" in error ? String(error.stderr) : "";
+    return { problem: stderr.trim() || reasonOf(error) };
+  }
+};
 
 /** Run the review for `args` in `root` and return the output and exit code. */
 export const run = (
@@ -62,9 +97,16 @@ export const run = (
   root: string = REPO_ROOT,
 ): { output: string; exitCode: number } => {
   const base = args[0];
+  const changed = base === undefined ? { files: [] } : changedFiles(root, base);
+  const review =
+    "problem" in changed
+      ? failure(
+          "基準のrefと比べられない",
+          `${base}...HEADの差分を取れません。refの名前と、履歴を取得しているか（CIではfetch-depth: 0）を確かめてください: ${changed.problem}`,
+        )
+      : reviewReport(root);
   const settings =
-    base === undefined ? [] : reviewSettingChanges(changedFiles(root, base));
-  const review = reviewFindings(loadReport(root), REPORT_PATH);
+    "problem" in changed ? [] : reviewSettingChanges(changed.files);
   return {
     output: `${[...settings, ...review.lines].join("\n")}\n`,
     exitCode: review.exitCode,

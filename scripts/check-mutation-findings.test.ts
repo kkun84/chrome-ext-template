@@ -43,6 +43,8 @@ const git = (...args: string[]): void => {
 describe("run", () => {
   it("exits 1 when a test stopped detecting a mutant", () => {
     writeReport({
+      schemaVersion: "2",
+      comparison: "available",
       findings: [
         {
           kind: "detectionRegression",
@@ -58,9 +60,15 @@ describe("run", () => {
   });
 
   it("exits 0 when nothing got weaker", () => {
-    writeReport({ comparison: "available", findings: [], files: {} });
+    writeReport({
+      schemaVersion: "2",
+      comparison: "available",
+      findings: [],
+      files: {},
+    });
     expect(run([], root)).toEqual({
-      output: "テストが弱くなった箇所: 0件、何も検出しない新しいテスト: 0件\n",
+      output:
+        "テストが弱くなった箇所: 0件、何も検出しない新しいテスト: 0件、テストが検出できないミュータント: 0件\n",
       exitCode: 0,
     });
   });
@@ -68,11 +76,53 @@ describe("run", () => {
   it("exits 1 when there is no report", () => {
     const { output, exitCode } = run([], root);
     expect(exitCode).toBe(1);
-    expect(output).toContain("ミューテーションテストの結果が無い");
+    expect(output).toBe(
+      "::error title=ミューテーションテストの結果が無い::.mutator/report/mutation.jsonがありません。先にpnpm mutation:diffを実行してください。\n",
+    );
+  });
+
+  it("exits 1 with the parse error when the report is not JSON", () => {
+    write(".mutator/report/mutation.json", "{");
+    const { output, exitCode } = run([], root);
+    expect(exitCode).toBe(1);
+    expect(output).toMatch(
+      /^::error title=ミューテーションテストの結果を読めない::\.mutator\/report\/mutation\.jsonがJSONとして読めません: /,
+    );
+  });
+
+  it("exits 1 when the report has another shape", () => {
+    writeReport({ findings: [], files: {} });
+    const { output, exitCode } = run([], root);
+    expect(exitCode).toBe(1);
+    expect(output).toBe(
+      "::error title=ミューテーションテストの結果の形が違う::.mutator/report/mutation.jsonは想定したmutator 0.4のレポートではありません: schemaVersionがありません。このスクリプトは2だけを読みます。\n",
+    );
+  });
+
+  it("exits 1 with git's message when the base ref does not exist", () => {
+    writeReport({
+      schemaVersion: "2",
+      comparison: "available",
+      findings: [],
+      files: {},
+    });
+    git("init", "--quiet", "--initial-branch=main");
+    const { output, exitCode } = run(["origin/missing"], root);
+    expect(exitCode).toBe(1);
+    expect(output).toMatch(
+      /^::error title=基準のrefと比べられない::origin\/missing\.\.\.HEADの差分を取れません。/,
+    );
+    expect(output).toContain("origin/missing");
+    expect(output.trimEnd().split("\n")).toHaveLength(1);
   });
 
   it("warns about mutator settings changed since the base ref", () => {
-    writeReport({ comparison: "available", findings: [], files: {} });
+    writeReport({
+      schemaVersion: "2",
+      comparison: "available",
+      findings: [],
+      files: {},
+    });
     write("mutator.config.json", "{}\n");
     git("init", "--quiet", "--initial-branch=main");
     git("add", "mutator.config.json");

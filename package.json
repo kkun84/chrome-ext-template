@@ -26,7 +26,7 @@
     "test:e2e": "pnpm build && playwright test",
     "fallow": "fallow dead-code && fallow architecture && fallow dupes && fallow health --score --complexity",
     "mutation": "mutator",
-    "mutation:diff": "sh -c 'if git rev-parse --verify --quiet origin/main >/dev/null 2>&1; then mutator --since origin/main --include-test-changes && pnpm mutation:findings origin/main; else echo \"skipping mutation:diff: origin/main not found\"; fi'",
+    "mutation:diff": "bash scripts/mutation-diff.sh --kill-matrix --skip-without-base origin/main",
     "mutation:findings": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/check-mutation-findings.ts",
     "fallow:audit": "fallow audit --base origin/main",
     "settings:check": "bash scripts/github-settings.sh --check",
