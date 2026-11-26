@@ -278,12 +278,18 @@ pnpm test:mutation-guard  # mutation:diffが、テストを弱めた変更を今
    これらのファイルの中身から作る環境ハッシュが一致する時だけ基準と比べるため。
 3. `pnpm install --frozen-lockfile --offline --ignore-scripts`と`wxt prepare`の後、全件を実行する。
    ミュータントが1件でも`Pending`のまま残れば失敗にする（mutatorの設定の`timeBudget`や`mutantsPerLine`で
-   打ち切ると、基準に`Killed`が残らず、弱めたテストを見逃すため）。コマンドラインで打ち消せない`since`と
-   `shard`は、設定にあれば実行の前に失敗にする（`scripts/mutation-scope.ts full-run`）。レポートの形式と
-   置き場はコマンドラインで渡し、設定の`reporters`や`reportDir`に左右されない。
-   mutatorの設定が基準と違えば、基準の元の設定でも全件を実行する。今の設定で消えるか検出されなくなる
-   ミュータント（`excludedMutators`、`weakMutation`など、ミュータントの集合や結果を変える設定すべて）のうち、
-   基準で変えたか消したテストが検出していたものがあれば失敗にする。それ以外は設定の変更の警告だけにする。
+   打ち切ると、基準に`Killed`が残らず、弱めたテストを見逃すため）。mutatorの設定の次の項目は、あれば実行の
+   前に失敗にする（`scripts/mutation-scope.ts full-run`）。コマンドラインで打ち消せない`since`と`shard`。
+   `vitest.config.*`とは別の設定やテストランナーでテストを集めさせる`runner`、`vitestConfig`、`jestConfig`、
+   `playwrightConfig`（4で比べる一覧は`vitest.config.*`から作るため）。基準と今が`.git/mutator/`の同じ
+   結果を読み書きする`sharedCache`。レポートの形式と置き場はコマンドラインで渡し、設定の`reporters`や
+   `reportDir`に左右されない。
+   mutatorの設定、`tsconfig*.json`、`vitest.config.*`、Vitestの`setupFiles`・`globalSetup`（基準のものと
+   今のもの）のどれかが基準のコミットと違えば、worktreeのそれらを基準のコミットの物に戻して、もう一度
+   全件を実行する。今の設定で消えるか`Killed`でなくなるミュータント（`excludedMutators`、`weakMutation`、
+   ミュータントを`CompileError`にする`tsconfig.json`の設定など）のうち、基準で変えたか消したテストが
+   検出していたものがあれば失敗にする。それ以外は設定の変更の警告だけにする。`package.json`と
+   ロックファイルは戻さない（基準の依存は入れない）。
 4. 基準のコミットの元の設定で集めていたテストファイルとmutatorの対象を、今の設定のものと比べる。
    基準のファイルが今も残っている（改名ならgitの対応付けで追う）のに今は集めていなければ失敗にする。
 5. 作業ツリーの`.mutator`を基準のsnapshotに置き換え、
@@ -295,9 +301,13 @@ pnpm test:mutation-guard  # mutation:diffが、テストを弱めた変更を今
    ミュータント（モジュール直下の正規表現など、どのテストも覆わないもの）を、`mutator --only <key>
    --kill-matrix`で実行して確かめる（`scripts/mutation-unselected.ts`）。テストのファイルか、それが
    （間接的にも）読み込むファイル（テスト用のヘルパーなど。mutatorのsnapshotの`deps`）が変わったテストも、
-   変えたテストに数える。
-7. worktreeを消す。同じ作業ツリーで2つ同時には動かない（`.git/mutation-diff.lock`へのflock。強制終了でも
-   ロックは残らず、次の実行が、終了処理をできなかった実行のworktreeを消す）。
+   変えたテストに数える。実行し直して`Survived`か`NoCoverage`なら「テストが弱くなった」、`Ignored`か
+   `Pending`か結果が無ければ「ミュータントの結果が想定と違う」で失敗にする。`Killed`、`Timeout`、
+   `RuntimeError`、`CompileError`（ソースの型を変えて、ミュータントが型検査を通らなくなった）は検出に数える。
+7. 各段階が出した注釈（エラーと警告）を、最後の1行で題名ごとに数える（`mutation:diffの結果: …`）。注釈を
+   出さずに失敗した時は「判定が途中で止まった」のエラーを足す。worktreeを消す。同じ作業ツリーで2つ同時には
+   動かない（`.git/mutation-diff.lock`へのflock。強制終了でもロックは残らず、次の実行が、終了処理をできな
+   かった実行のworktreeを消す）。
 
 次の時も失敗にします。
 
@@ -307,16 +317,17 @@ pnpm test:mutation-guard  # mutation:diffが、テストを弱めた変更を今
 - 基準を作ったのにmutatorが比べられなかった（`comparison`が`unavailable`）、レポートが壊れているか形が
   違う、基準のrefが無い。
 - 基準の全件か、変更の範囲にミュータントが実行されずに残った（`timeBudget`や`mutantsPerLine`など）。
-  mutatorの設定に`since`か`shard`がある。
+  mutatorの設定に`since`、`shard`、`runner`、`vitestConfig`、`jestConfig`、`playwrightConfig`、
+  `sharedCache`のどれかがある。
 - `.mutator`がgitで追跡されている。
 
 所要時間は、このテンプレートで、手元のpre-push相当が30〜40秒（基準の全件が大半）、CIの判定が20秒ほど、
-`pnpm test:mutation-guard`が1分半〜2分半です。
+`pnpm test:mutation-guard`が2分半〜4分です。
 
 ### 機械では確かめられないもの
 
 - 次のファイルが変わると警告を出すので、人が確かめます。`mutator.config.*`、`mutator.accepted.json`、
-  `vitest.config.*`、Vitestの`setupFiles` / `globalSetup`、判定のスクリプト（`scripts/mutation-*`、
+  `tsconfig*.json`、`vitest.config.*`、Vitestの`setupFiles` / `globalSetup`、判定のスクリプト（`scripts/mutation-*`、
   `scripts/check-mutation-findings.ts`）、`package.json`、`lefthook.yml`、`.github/workflows/*`。
   準備ファイルで`expect`を無力化したり、Vitestの`testNamePattern`などでファイルを集めたままテストを
   外したりする変更は、ミューテーションテストでは見つかりません。コミットしていない変更も対象です。
@@ -327,6 +338,21 @@ pnpm test:mutation-guard  # mutation:diffが、テストを弱めた変更を今
 - 破壊的な依存の更新とテストの直しを同じPRに入れると、基準を作れず必ず失敗します。新旧どちらの依存
   でも動くテストの直しを先に`main`へ入れます。分けられない時は管理者が判断します。
 - テストがファイルシステムから読むデータの変更は検出しません。
+- ソースのファイルを改名（移動）して、同時にそのテストを弱めると、警告だけになります（改名したファイルの
+  ミュータントは、変わったコードとして扱われます）。
+- ソースを変えた結果、変えていない他の関数のミュータントを検出できなくなっても、判定の対象外です。テスト
+  ではなくソースの変更で検出が減る場合は、テストを弱めた変更として扱いません。
+- 逆に、ソースを変えた結果、呼び出す側のミュータントが等価になる（どう書き換えても振る舞いが変わらない）
+  と、テストを弱めていなくても「テストが弱くなった」で失敗する事があります。
+- mutatorの設定（や`tsconfig*.json`、Vitestの設定）と、テストが読み込むソースを同じPRで変えると、テストを
+  弱めていなくても「設定の変更で、変えたテストが確かめるミュータントが外れた」で失敗する事があります。
+  その時は設定の変更を別のPRに分けます。
+- `package.json`とロックファイルを変えた時は、基準の元の依存では数え直しません。依存の更新で
+  ミュータントが`CompileError`になって比較から外れても、見つかりません。
+- 多くのテストが読み込むソースを変えると、それらのテストが変えたテストに数えられ、6の実行し直しが
+  増えて遅くなります。
+- `pnpm mutation:diff`の親のシェルだけを強制終了すると、それが起動したmutatorやpnpmが終わるまで
+  ロックが残ります（その間に次を実行すると「mutation:diffが動いている」で止まります）。
 
 ### 実行する場所
 

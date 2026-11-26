@@ -8,16 +8,19 @@
  *   node ... scripts/mutation-unselected.ts --pending <report> <where>
  *
  * `<work-dir>` holds the baseline's `base-report.json` and
- * `base-snapshot.json`, and `base-own-report.json` when mutator's settings
- * changed (all written by `scripts/mutation-diff.sh`); the current report and
+ * `base-snapshot.json`, and `base-own-report.json` (the baseline run again
+ * with the base's own mutator settings, `tsconfig*.json` and Vitest files)
+ * when one of those changed, with its `base-own-snapshot.json` (all written
+ * by `scripts/mutation-diff.sh`); the current report and
  * snapshot are read from `.mutator/`. A test counts as touched when mutator
  * names it, or when its file or a file it loads (the `deps` of the
  * snapshots) changed since `<merge-base>`, committed or not.
  *
  * - The mutants `unselectedCandidates` picks (see `mutation-findings.ts` for
  *   why) run with `mutator --only <key>... --kill-matrix`, and each one no
- *   test detects, or whose status is unexpected, is an error.
- * - With `base-own-report.json`, each mutant the new settings take out while
+ *   test detects, or whose status is unexpected, is an error. One that no
+ *   longer compiles (`CompileError`) counts as detected.
+ * - With `base-own-report.json`, each mutant the new files take out while
  *   a touched test killed it is an error (`reviewSettingDrops`).
  *
  * `--pending` fails when the report has a `Pending` mutant: the baseline must
@@ -122,10 +125,20 @@ const check = (work: string, mergeBase: string): readonly string[] => {
   const current = readReport(".mutator/report/mutation.json");
   const baseSnapshot = readJson(join(work, "base-snapshot.json"));
   const currentSnapshot = readJson(".mutator/snapshot.json");
+  // The base's own files may collect tests the current ones leave out; their
+  // deps come from the run with those files.
+  const ownSnapshotPath = join(work, "base-own-snapshot.json");
+  const ownSnapshot = existsSync(ownSnapshotPath)
+    ? readJson(ownSnapshotPath)
+    : undefined;
   const touched = touchedTests(
     current,
     changedFiles(mergeBase),
-    mergeDeps(snapshotDeps(baseSnapshot), snapshotDeps(currentSnapshot)),
+    mergeDeps(
+      snapshotDeps(baseSnapshot),
+      snapshotDeps(currentSnapshot),
+      snapshotDeps(ownSnapshot),
+    ),
   );
   const ownPath = join(work, "base-own-report.json");
   const drops = existsSync(ownPath)

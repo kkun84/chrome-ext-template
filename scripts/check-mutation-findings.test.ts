@@ -67,17 +67,17 @@ describe("run", () => {
       files: {},
     });
     expect(run([], root)).toEqual({
-      output:
-        "テストが弱くなった箇所: 0件、何も検出しない新しいテスト: 0件、テストが検出できないミュータント: 0件\n",
+      output: "mutation:diffの結果: 通過。エラー0件、警告0件\n",
       exitCode: 0,
     });
+    expect(run(["--no-summary"], root)).toEqual({ output: "\n", exitCode: 0 });
   });
 
   it("exits 1 when there is no report", () => {
     const { output, exitCode } = run([], root);
     expect(exitCode).toBe(1);
     expect(output).toBe(
-      "::error title=ミューテーションテストの結果が無い::.mutator/report/mutation.jsonがありません。先にpnpm mutation:diffを実行してください。\n",
+      "::error title=ミューテーションテストの結果が無い::.mutator/report/mutation.jsonがありません。先にpnpm mutation:diffを実行してください。\nmutation:diffの結果: 失敗。エラー1件（「ミューテーションテストの結果が無い」1件）、警告0件\n",
     );
   });
 
@@ -94,8 +94,8 @@ describe("run", () => {
     writeReport({ findings: [], files: {} });
     const { output, exitCode } = run([], root);
     expect(exitCode).toBe(1);
-    expect(output).toBe(
-      "::error title=ミューテーションテストの結果の形が違う::.mutator/report/mutation.jsonは想定したmutator 0.4のレポートではありません: schemaVersionがありません。このスクリプトは2だけを読みます。\n",
+    expect(output.split("\n")[0]).toBe(
+      "::error title=ミューテーションテストの結果の形が違う::.mutator/report/mutation.jsonは想定したmutator 0.4のレポートではありません: schemaVersionがありません。このスクリプトは2だけを読みます。",
     );
   });
 
@@ -113,7 +113,7 @@ describe("run", () => {
       /^::error title=基準のrefと比べられない::origin\/missingとの差分を取れません。/,
     );
     expect(output).toContain("origin/missing");
-    expect(output.trimEnd().split("\n")).toHaveLength(1);
+    expect(output.trimEnd().split("\n")).toHaveLength(2);
   });
 
   it("reads skipped tests and unrun mutants from mutator's output", () => {
@@ -137,6 +137,9 @@ describe("run", () => {
     );
     expect(output).toContain(
       "title=変更の範囲のミュータントが実行されなかった",
+    );
+    expect(output.trimEnd().split("\n").at(-1)).toBe(
+      "mutation:diffの結果: 失敗。エラー1件（「変更の範囲のミュータントが実行されなかった」1件）、警告1件（「飛ばしたテスト」1件）",
     );
   });
 
@@ -186,5 +189,25 @@ describe("run", () => {
       /^::warning file=mutator\.config\.json,title=ミューテーションテストの設定が変わった::/,
     );
     expect(output).not.toContain("src/core/a.ts");
+  });
+
+  it("warns about a renamed settings file under its old name too", () => {
+    writeReport({
+      schemaVersion: "2",
+      comparison: "available",
+      findings: [],
+      files: {},
+    });
+    write("mutator.config.json", '{"include":["src/**/*.ts"]}\n');
+    git("init", "--quiet", "--initial-branch=main");
+    git("add", "mutator.config.json");
+    git("commit", "--quiet", "-m", "base");
+    git("switch", "--quiet", "-c", "change");
+    git("mv", "mutator.config.json", "mutator-settings.json");
+    git("commit", "--quiet", "-m", "rename");
+    const { output } = run(["main", "--no-summary"], root);
+    expect(output).toContain(
+      "::warning file=mutator.config.json,title=ミューテーションテストの設定が変わった::",
+    );
   });
 });

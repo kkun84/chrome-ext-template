@@ -132,4 +132,34 @@ describe("reviewFullRun", () => {
     );
     expect(lines[1]).toContain("shardがあります");
   });
+
+  it("fails on settings that pick another test runner or config, and on sharedCache", () => {
+    const lines = reviewFullRun(
+      {
+        runner: "vitest",
+        vitestConfig: "vitest.config.alt.ts",
+        jestConfig: "jest.config.js",
+        playwrightConfig: "playwright.config.ts",
+        sharedCache: false,
+      },
+      "mutator.config.json",
+    );
+    expect(
+      lines.map((line) =>
+        /title=([^:]+)::mutator\.config\.jsonに(\w+)があります/
+          .exec(line)
+          ?.slice(1),
+      ),
+    ).toEqual(
+      [
+        "runner",
+        "vitestConfig",
+        "jestConfig",
+        "playwrightConfig",
+        "sharedCache",
+      ].map((key) => ["判定で使えない設定がある", key]),
+    );
+    expect(lines[1]).toContain("別のテストランナーか設定でテストを集めます");
+    expect(lines[4]).toContain(".git/mutator/");
+  });
 });

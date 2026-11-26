@@ -5,7 +5,8 @@
  * Usage:
  *   node --experimental-strip-types --disable-warning=ExperimentalWarning \
  *     scripts/check-mutation-findings.ts [base-ref] [--watch <file>]... \
- *     [--mutator-output <file>]
+ *     [--mutator-output <file>] [--no-summary]
+ *   node ... scripts/check-mutation-findings.ts --summary <output> <exit-code>
  *
  * Reads `.mutator/report/mutation.json` from the last mutator run and prints
  * GitHub Actions annotations: an error for each mutant the tests detected
@@ -19,8 +20,11 @@
  * the change skips is a warning, and mutants of the diff left unrun are an
  * error. Exits 1 when the tests got weaker, when mutator had no baseline to
  * compare with, when mutants of the diff were not run, or when the report or
- * the ref cannot be read. `scripts/mutation-diff.sh` makes the baseline and
- * runs this.
+ * the ref cannot be read. The last line counts the errors and warnings;
+ * `--no-summary` leaves it out. `scripts/mutation-diff.sh` makes the baseline
+ * and runs this with `--no-summary`, and prints the count of the whole run at
+ * the end with `--summary`: the annotations in `<output>`, everything the run
+ * printed, and the run's exit code.
  */
 
 import { execFileSync } from "node:child_process";
@@ -36,6 +40,7 @@ import {
   reviewNotRun,
   reviewSettingChanges,
   reviewSkippedTests,
+  summarize,
 } from "./mutation-findings.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -114,7 +119,9 @@ const changedFiles = (
     // --since.
     const mergeBase = git(root, ["merge-base", base, "HEAD"]).trim();
     const output = [
-      git(root, ["diff", "--name-only", mergeBase]),
+      // --no-renames lists the old name of a renamed file too, so renaming
+      // a settings file cannot hide it.
+      git(root, ["diff", "--no-renames", "--name-only", mergeBase]),
       git(root, ["ls-files", "--others", "--exclude-standard"]),
     ].join("\n");
     return { files: output.split("\n").filter((file) => file.length > 0) };
@@ -151,14 +158,34 @@ export const run = (
   const mutatorOutput =
     outputPath === undefined ? "" : readFileSync(outputPath, "utf8");
   const notRun = reviewNotRun(mutatorOutput);
+  const lines = [
+    ...settings,
+    ...reviewSkippedTests(mutatorOutput),
+    ...notRun,
+    ...review.lines,
+  ];
+  const exitCode = notRun.length > 0 ? 1 : review.exitCode;
   return {
-    output: `${[...settings, ...reviewSkippedTests(mutatorOutput), ...notRun, ...review.lines].join("\n")}\n`,
-    exitCode: notRun.length > 0 ? 1 : review.exitCode,
+    output: `${[...lines, ...(args.includes("--no-summary") ? [] : summarize(lines, exitCode))].join("\n")}\n`,
+    exitCode,
   };
 };
 
+/** The `--summary <output> <exit-code>` mode. */
+const summary = (args: readonly string[]): string => {
+  const [path, code] = args;
+  const lines =
+    path === undefined ? [] : readFileSync(path, "utf8").split("\n");
+  return `${summarize(lines, Number(code ?? "1")).join("\n")}\n`;
+};
+
 const main = (): void => {
-  const { output, exitCode } = run(process.argv.slice(2));
+  const args = process.argv.slice(2);
+  if (args[0] === "--summary") {
+    process.stdout.write(summary(args.slice(1)));
+    return;
+  }
+  const { output, exitCode } = run(args);
   process.stdout.write(output);
   if (exitCode !== 0) {
     process.exitCode = exitCode;

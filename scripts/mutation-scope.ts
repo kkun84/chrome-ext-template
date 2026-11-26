@@ -27,7 +27,10 @@
  * running every mutant in a way no command line flag can undo: `since` turns
  * the baseline into a run of the diff, and `shard` runs a part of it.
  * (`timeBudget` and `mutantsPerLine` leave mutants `Pending`, which
- * `scripts/mutation-unselected.ts --pending` catches.)
+ * `scripts/mutation-unselected.ts --pending` catches.) It also fails on
+ * `runner`, `vitestConfig`, `jestConfig` and `playwrightConfig`, which make
+ * mutator collect tests apart from the Vitest config `list` reads, and on
+ * `sharedCache`, which makes the baseline and the change share snapshots.
  */
 
 import { execFileSync } from "node:child_process";
@@ -241,19 +244,59 @@ const list = async (args: readonly string[]): Promise<Scope> => {
 /** Settings that keep a full run from running every mutant. */
 const PARTIAL_SETTINGS = ["since", "shard"] as const;
 
-/** Error annotations for the settings in `PARTIAL_SETTINGS` that are set. */
+/**
+ * Settings that point mutator at another test runner or config file. The
+ * test files `list` collects come from the default Vitest config, so a
+ * `vitestConfig` that excludes a test (or another runner) would take it out
+ * of both the baseline and the change without `compare` seeing it.
+ */
+const RUNNER_SETTINGS = [
+  "runner",
+  "vitestConfig",
+  "jestConfig",
+  "playwrightConfig",
+] as const;
+
+/**
+ * `sharedCache` keeps the snapshots in the Git common directory
+ * (`.git/mutator/`), where the baseline worktree and this checkout read and
+ * write the same files, so the baseline is no longer made fresh.
+ */
+const SHARED_SETTINGS = ["sharedCache"] as const;
+
+type CheckedSetting =
+  | (typeof PARTIAL_SETTINGS)[number]
+  | (typeof RUNNER_SETTINGS)[number]
+  | (typeof SHARED_SETTINGS)[number];
+
+const reason = (key: CheckedSetting): string =>
+  (PARTIAL_SETTINGS as readonly string[]).includes(key)
+    ? "基準を作る全件の実行が一部のミュータントだけの実行になり"
+    : (RUNNER_SETTINGS as readonly string[]).includes(key)
+      ? "mutatorが、判定がテストファイルを集めるvitest.config.*とは別のテストランナーか設定でテストを集めます。そこで外したテストは、基準と今の両方から消え"
+      : "基準と今が、.git/mutator/の同じ結果を読み書きし、基準を毎回その場で作れなくなり";
+
+/**
+ * Error annotations for the settings that would let a weakened test pass:
+ * `PARTIAL_SETTINGS`, `RUNNER_SETTINGS` and `SHARED_SETTINGS`. This
+ * repository uses none of them, so any value fails.
+ */
 export const reviewFullRun = (
-  config: { readonly [key in (typeof PARTIAL_SETTINGS)[number]]?: unknown },
+  config: { readonly [key in CheckedSetting]?: unknown },
   source: string,
 ): readonly string[] =>
-  PARTIAL_SETTINGS.filter((key) => config[key] !== undefined).map((key) =>
-    formatAnnotation({
-      level: "error",
-      title: "基準の全件を打ち切る設定がある",
-      file: source,
-      message: `${source}に${key}があります。${key}があると、基準を作る全件の実行が一部のミュータントだけの実行になり、テストが弱くなったかを確かめられないため、失敗にします。設定から外し、必要ならコマンドラインで渡してください。`,
-    }),
-  );
+  [...PARTIAL_SETTINGS, ...RUNNER_SETTINGS, ...SHARED_SETTINGS]
+    .filter((key) => config[key] !== undefined)
+    .map((key) =>
+      formatAnnotation({
+        level: "error",
+        title: (PARTIAL_SETTINGS as readonly string[]).includes(key)
+          ? "基準の全件を打ち切る設定がある"
+          : "判定で使えない設定がある",
+        file: source,
+        message: `${source}に${key}があります。${key}があると、${reason(key)}、テストが弱くなったかを確かめられないため、失敗にします。設定から外してください。${(PARTIAL_SETTINGS as readonly string[]).includes(key) ? "必要ならコマンドラインで渡してください。" : ""}`,
+      }),
+    );
 
 const fullRun = async (args: readonly string[]): Promise<number> => {
   const root = resolve(optionValue(args, "--root") ?? ".");

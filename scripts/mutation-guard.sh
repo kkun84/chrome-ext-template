@@ -30,6 +30,18 @@
 #    takes the mutants the test detected out of both the baseline and the
 #    change, it must exit 1 with a
 #    "設定の変更で、変えたテストが確かめるミュータントが外れた" error.
+# 8. After deleting a test and turning on noUnusedParameters in
+#    tsconfig.json, which turns the mutants only that test detected into
+#    CompileError in the baseline and the change alike (the baseline gets
+#    the new tsconfig.json), likewise. The base turns the option off for
+#    this case.
+# 9. After pointing mutator at another Vitest config that leaves out the
+#    helper's test and weakening the helper, it must exit 1 with a
+#    "判定で使えない設定がある" error.
+# 10. With sharedCache in mutator.config.json, likewise.
+# 11. After narrowing the return type of a function next to a constant
+#    (the constant's mutant, which the diff does not select, then no longer
+#    type-checks), it must exit 0.
 #
 # The temporary repository gets its own .git; lefthook is not installed there
 # (--ignore-scripts), so this checkout's .git/hooks stay as they are. CI runs
@@ -107,6 +119,49 @@ it("rejects anything else", () => {
   expectDigits("12a", false);
 });
 TS
+# Case 8: a function whose mutants that drop the use of its parameter only
+# the first test detects, and which noUnusedParameters makes CompileError.
+kind=src/core/mutation-guard-kind
+cat >"$kind.ts" <<'TS'
+export const kind = (text: string): string => {
+  if (text.length === 0) {
+    return "empty";
+  }
+  return "text";
+};
+TS
+cat >"$kind.test.ts" <<'TS'
+import { expect, it } from "vitest";
+import { kind } from "./mutation-guard-kind.js";
+
+it("names text", () => {
+  expect(kind("a")).toBe("text");
+});
+
+it("names nothing", () => {
+  expect(kind("")).toBe("empty");
+});
+
+it("never names text with nothing", () => {
+  expect(kind("b")).not.toBe("");
+});
+TS
+sed -i 's/"noUnusedParameters": true/"noUnusedParameters": false/' tsconfig.json
+# Case 11: a constant that only the test of label detects.
+folder=src/core/mutation-guard-folder
+cat >"$folder.ts" <<'TS'
+export const FOLDER = "notes";
+
+export const label = (): string => FOLDER;
+TS
+cat >"$folder.test.ts" <<'TS'
+import { expect, it } from "vitest";
+import { label } from "./mutation-guard-folder.js";
+
+it("names the folder", () => {
+  expect(label()).toBe("notes");
+});
+TS
 commit() {
   git -c user.name=guard -c user.email=guard@example.invalid -c commit.gpgsign=false \
     commit --quiet --no-verify "$@"
@@ -170,6 +225,31 @@ start excluded-mutator
 git rm --quiet "$sample.test.ts"
 configure '{"excludedMutators": ["Regex"]}'
 expect excluded-mutator 1 "設定の変更で、変えたテストが確かめるミュータントが外れた"
+start tsconfig
+sed -i 's/"noUnusedParameters": false/"noUnusedParameters": true/' tsconfig.json
+sed -i '/^it("names text"/,/^});$/d' "$kind.test.ts"
+expect tsconfig 1 "設定の変更で、変えたテストが確かめるミュータントが外れた"
+start vitest-config
+cat >vitest.config.alt.ts <<'TS'
+import { configDefaults, defineConfig } from "vitest/config";
+
+export default defineConfig({
+  test: {
+    include: ["src/**/*.test.ts", "scripts/**/*.test.ts"],
+    exclude: [...configDefaults.exclude, "src/core/mutation-guard-digits.test.ts"],
+    environment: "node",
+  },
+});
+TS
+configure '{"vitestConfig": "vitest.config.alt.ts"}'
+sed -i 's/toBe(want)/toBeDefined()/' "$helper.ts"
+expect vitest-config 1 "判定で使えない設定がある"
+start shared-cache
+configure '{"sharedCache": true}'
+expect shared-cache 1 "判定で使えない設定がある"
+start narrowed-type
+sed -i 's/(): string => FOLDER/(): "notes" => FOLDER/' "$folder.ts"
+expect narrowed-type 0
 
 echo "mutation-guard: done in $(($(date +%s) - started))s"
 exit "$failed"

@@ -61,7 +61,7 @@ entrypoints  →  layers / services  →  core
 
 ## Machine-enforced rules
 
-規約は文章だけでなく、次のツールで機械的に強制されます（mutatorはテストを弱めた変更だけが`error`、他はすべて`error`）。
+規約は文章だけでなく、次のツールで機械的に強制されます（すべて`error`。mutatorは、テストを弱めた変更と、それを確かめられない状態が`error`で、設定の変更などは`warning`）。
 
 - **Biome**（`biome.json`、`pnpm lint` = `biome ci .`）:
   format / recommended lint、`noExplicitAny`（`any`禁止）、`noImplicitAnyLet`、
@@ -96,14 +96,19 @@ entrypoints  →  layers / services  →  core
   `added-suppression`は`error`（新規の抑制コメントを拒否）。
 - **mutator**（`mutator.config.json`）: `src/core` / `src/services`のミュータントを実行する。
   `pnpm check`（とpre-push）とCIの`mutation`ジョブが、`scripts/mutation-diff.sh`でテストを弱めた変更を
-  失敗にする。仕組みと、失敗・警告の条件、機械では確かめられないものはREADMEの「mutator」節にある。
+  失敗にする。基準を作れない、ミュータントが実行されずに残る、判定で使えない設定（`since`、`shard`、
+  `runner`、`vitestConfig`、`jestConfig`、`playwrightConfig`、`sharedCache`）がある、なども失敗にする。
+  最後の行（`mutation:diffの結果: …`）が、すべての段階のエラーと警告の件数。仕組みと、失敗・警告の条件、
+  機械では確かめられないものはREADMEの「mutator」節にある。
   - テストを弱めた変更と判定されたら、弱めたアサーションや消したテストを戻すか、同じ振る舞いを確かめる
     テストを足す。`mutator accept`で通さない。`mutator.accepted.json`には等価ミュータントだけを記録する。
   - ミューテーションテストから外すものは、コメントではなく`mutator.config.json`の`exclude`に書く。
   - 検出できないミュータントは、テストが足りないのか、コードが要らないのかを判断する。テストを足すときは、
     呼び出す側から見える振る舞いを確かめる。手順は`node_modules/@mizchi/mutator/skills/mutation-test-loop/SKILL.md`。
-  - テストの設定と準備ファイル、判定のスクリプト、`package.json`、`lefthook.yml`、ワークフローを変えると
-    警告が出る。警告の内容を確かめ、PRの説明に理由を書く。
+  - テストの設定と準備ファイル、`tsconfig*.json`、判定のスクリプト、`package.json`、`lefthook.yml`、
+    ワークフローを変えると警告が出る。警告の内容を確かめ、PRの説明に理由を書く。
+  - 「設定の変更で、変えたテストが確かめるミュータントが外れた」で失敗し、テストを弱めていないなら、
+    設定の変更（mutatorの設定、`tsconfig*.json`、Vitestの設定）を別のPRに分ける。
   - mutatorを上げたら`pnpm test:mutation-guard`で、判定が外れていないかを確かめる。
 - **TypeScript**（`tsconfig.json`）: `strict`、`noUncheckedIndexedAccess`、
   `exactOptionalPropertyTypes`、`noImplicitOverride`、`noPropertyAccessFromIndexSignature`、

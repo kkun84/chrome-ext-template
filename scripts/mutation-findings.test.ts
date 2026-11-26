@@ -14,6 +14,7 @@ import {
   reviewUnselected,
   scopeHashes,
   snapshotDeps,
+  summarize,
   touchedTests,
   unselectedCandidates,
 } from "./mutation-findings.ts";
@@ -68,7 +69,6 @@ describe("reviewFindings", () => {
       lines: [
         `::error file=src/core/tabs.ts,line=37,title=テストが弱くなった::変わっていないコードのミュータント1gfsysf9ilu（ConditionalExpressionでfalseに置き換え）を、前は「src/core/tabs.test.ts#selectPersistableUrl > prefers the active tab over an earlier tab in the last-focused window」が検出していましたが、${REGRESSION_ADVICE}`,
         `::warning file=src/core/tabs.ts,line=31,title=テストが検出できないミュータント::ミュータント1j1pdhef46w（FnValueで{ return ""; }に置き換え）は、${GAP_ADVICE}`,
-        "テストが弱くなった箇所: 1件、何も検出しない新しいテスト: 0件、テストが検出できないミュータント: 1件",
       ],
       exitCode: 1,
     });
@@ -80,7 +80,6 @@ describe("reviewFindings", () => {
     ).toEqual({
       lines: [
         "::warning file=src/core/tabs.test.ts,title=何も検出しない新しいテスト::src/core/tabs.test.ts#selectPersistableUrl (no assertions) > only calls itは、測ったミュータントを1つも検出しません。アサーションを確かめてください。",
-        "テストが弱くなった箇所: 0件、何も検出しない新しいテスト: 1件、テストが検出できないミュータント: 0件",
       ],
       exitCode: 0,
     });
@@ -149,12 +148,7 @@ describe("reviewFindings", () => {
           ],
         }),
       ),
-    ).toEqual({
-      lines: [
-        "テストが弱くなった箇所: 0件、何も検出しない新しいテスト: 0件、テストが検出できないミュータント: 0件",
-      ],
-      exitCode: 0,
-    });
+    ).toEqual({ lines: [], exitCode: 0 });
   });
 
   it("warns about a changed test file the runner does not collect", () => {
@@ -276,27 +270,48 @@ describe("unselected mutants", () => {
           mutants: [
             mutant("moduleLevel", "Survived"),
             mutant("missing", "Killed", [other]),
-            mutant("odd", "RuntimeError"),
+            mutant("uncovered", "NoCoverage"),
+            mutant("odd", "Ignored"),
+            mutant("waiting", "Pending"),
           ],
         },
       },
     });
     const lines = reviewUnselected(
       baseReport,
-      ["moduleLevel", "missing", "odd", "absent"],
+      ["moduleLevel", "missing", "uncovered", "odd", "waiting", "absent"],
       rerun,
     );
-    expect(lines).toHaveLength(3);
+    expect(lines).toHaveLength(5);
     expect(lines[0]).toMatch(
       /^::error file=src\/core\/a\.ts,line=4,title=テストが弱くなった::変わっていないコードのミュータントmoduleLevel/,
     );
     expect(lines[0]).toContain("mutator acceptで通さないでください");
-    expect(lines[1]).toMatch(
-      /title=ミュータントの結果が想定と違う::.*RuntimeError/,
-    );
-    expect(lines[2]).toMatch(
+    expect(lines[1]).toMatch(/title=テストが弱くなった::.*uncovered/);
+    expect(lines[2]).toMatch(/title=ミュータントの結果が想定と違う::.*Ignored/);
+    expect(lines[3]).toMatch(/title=ミュータントの結果が想定と違う::.*Pending/);
+    expect(lines[4]).toMatch(
       /title=ミュータントの結果が想定と違う::.*ありません/,
     );
+  });
+
+  it("counts a mutant that no longer compiles, fails at run time or times out as detected", () => {
+    const rerun = report({
+      ...base,
+      findings: [],
+      files: {
+        "src/core/a.ts": {
+          mutants: [
+            mutant("moduleLevel", "CompileError"),
+            mutant("missing", "RuntimeError"),
+            mutant("ran", "Timeout"),
+          ],
+        },
+      },
+    });
+    expect(
+      reviewUnselected(baseReport, ["moduleLevel", "missing", "ran"], rerun),
+    ).toEqual([]);
   });
 
   it("fails when a run left a mutant Pending", () => {
@@ -412,6 +427,8 @@ describe("reviewSettingDrops", () => {
           mutant("excluded", "Killed", [touched, other]),
           mutant("weakened", "Killed", [touched]),
           mutant("kept", "Killed", [touched]),
+          mutant("timedOut", "Killed", [touched]),
+          mutant("uncompiled", "Killed", [touched]),
           mutant("unrelated", "Killed", [other]),
           mutant("survived", "Survived"),
         ],
@@ -426,6 +443,8 @@ describe("reviewSettingDrops", () => {
         mutants: [
           mutant("weakened", "Survived"),
           mutant("kept", "Killed", [touched]),
+          mutant("timedOut", "Timeout"),
+          mutant("uncompiled", "CompileError"),
         ],
       },
     },
@@ -433,11 +452,16 @@ describe("reviewSettingDrops", () => {
 
   it("fails on a mutant the new settings drop while a touched test killed it", () => {
     const lines = reviewSettingDrops(own, now, (test) => test === touched);
-    expect(lines).toHaveLength(2);
+    expect(lines).toHaveLength(4);
     expect(lines[0]).toMatch(
-      /^::error file=src\/core\/a\.ts,line=4,title=設定の変更で、変えたテストが確かめるミュータントが外れた::ミュータントexcluded（Regexで\/a\/に置き換え）は、基準の元の設定では「src\/a\.test\.ts#touched」が検出していましたが、今のmutatorの設定では作られません。/,
+      /^::error file=src\/core\/a\.ts,line=4,title=設定の変更で、変えたテストが確かめるミュータントが外れた::ミュータントexcluded（Regexで\/a\/に置き換え）は、基準の元の設定では「src\/a\.test\.ts#touched」が検出していましたが、今の設定（mutatorの設定、tsconfig\*\.json、Vitestの設定と準備ファイル）では作られません。/,
     );
-    expect(lines[1]).toContain("今のmutatorの設定ではSurvivedになります");
+    expect(lines[0]).toContain("設定の変更を別のPRに分けてください");
+    expect(
+      lines
+        .slice(1)
+        .map((line) => /今の設定（[^）]*）では(\w+)/.exec(line)?.[1]),
+    ).toEqual(["Timeout", "CompileError", "Survived"]);
   });
 
   it("leaves the mutants of untouched tests to the warning about the settings", () => {
@@ -584,6 +608,21 @@ describe("reviewSettingChanges", () => {
     ]);
   });
 
+  it("warns about tsconfig*.json at the root", () => {
+    expect(
+      reviewSettingChanges([
+        "tsconfig.json",
+        "tsconfig.build.json",
+        "src/tsconfig.json",
+      ]).map((line) =>
+        /^::warning file=([^,]+),title=([^:]+)::/.exec(line)?.slice(1),
+      ),
+    ).toEqual([
+      ["tsconfig.json", "型検査の設定が変わった"],
+      ["tsconfig.build.json", "型検査の設定が変わった"],
+    ]);
+  });
+
   it("warns about the Vitest config and the setup files it names", () => {
     expect(
       reviewSettingChanges(
@@ -595,6 +634,54 @@ describe("reviewSettingChanges", () => {
         (file) =>
           `::warning file=${file},title=テストの設定や準備ファイルが変わった::${file}が変わりました。テストの設定や準備ファイルは、アサーションを無力化するなど、ミューテーションテストでは見つからない形でテストを弱められます。人が確かめてください。`,
       ),
+    );
+  });
+});
+
+describe("summarize", () => {
+  const error = (title: string, file?: string): string =>
+    formatAnnotation({
+      level: "error",
+      title,
+      message: "m",
+      ...(file === undefined ? {} : { file, line: 3 }),
+    });
+
+  it("counts the errors and warnings of every step by title, once", () => {
+    expect(
+      summarize(
+        [
+          "mutation:diff: making the baseline",
+          formatAnnotation({
+            level: "warning",
+            title: "型検査の設定が変わった",
+            message: "m",
+          }),
+          error("テストが弱くなった", "src/core/a.ts"),
+          error("ミュータントの結果が想定と違う"),
+          error("テストが弱くなった"),
+          error("ミューテーションテストの対象から外れた", "src/a,b.ts"),
+          error("設定の変更で、変えたテストが確かめるミュータントが外れた"),
+          formatAnnotation({ level: "notice", title: "n", message: "m" }),
+        ],
+        1,
+      ),
+    ).toEqual([
+      "mutation:diffの結果: 失敗。エラー5件（「テストが弱くなった」2件、「ミュータントの結果が想定と違う」1件、「ミューテーションテストの対象から外れた」1件、「設定の変更で、変えたテストが確かめるミュータントが外れた」1件）、警告1件（「型検査の設定が変わった」1件）",
+    ]);
+  });
+
+  it("passes with no annotations", () => {
+    expect(summarize(["done"], 0)).toEqual([
+      "mutation:diffの結果: 通過。エラー0件、警告0件",
+    ]);
+  });
+
+  it("adds an error for a failure that wrote none", () => {
+    const lines = summarize(["cp: cannot stat"], 1);
+    expect(lines[0]).toMatch(/^::error title=判定が途中で止まった::/);
+    expect(lines[1]).toBe(
+      "mutation:diffの結果: 失敗。エラー1件（「判定が途中で止まった」1件）、警告0件",
     );
   });
 });

@@ -253,6 +253,15 @@ const escapeData = (text: string): string =>
 const escapeProperty = (text: string): string =>
   escapeData(text).replaceAll(":", "%3A").replaceAll(",", "%2C");
 
+/** The inverse of `escapeProperty`. */
+const unescapeProperty = (text: string): string =>
+  text
+    .replaceAll("%2C", ",")
+    .replaceAll("%3A", ":")
+    .replaceAll("%0A", "\n")
+    .replaceAll("%0D", "\r")
+    .replaceAll("%25", "%");
+
 /** Format a workflow command such as `::error file=a.ts,line=3,title=t::m`. */
 export const formatAnnotation = (annotation: Annotation): string => {
   const properties = [
@@ -372,6 +381,10 @@ const isMutationSetting = (file: string): boolean =>
 const isVitestConfig = (file: string): boolean =>
   file.startsWith("vitest.config.") && !file.includes("/");
 
+/** True for `tsconfig*.json` at the root, which the baseline copies. */
+const isTsconfig = (file: string): boolean =>
+  /^tsconfig[^/]*\.json$/u.test(file);
+
 /** The review itself and what runs it: editing them can switch it off. */
 const isJudge = (file: string): boolean =>
   file === "package.json" ||
@@ -400,6 +413,14 @@ const settingChange = (
       message: `${file}が変わりました。テストの設定や準備ファイルは、アサーションを無力化するなど、ミューテーションテストでは見つからない形でテストを弱められます。人が確かめてください。`,
     };
   }
+  if (isTsconfig(file)) {
+    return {
+      level: "warning",
+      title: "型検査の設定が変わった",
+      file,
+      message: `${file}が変わりました。型検査の設定は、ミュータントをCompileErrorにしてミューテーションテストの比較から外せます。基準の元の設定で外れたミュータントは失敗にしますが、それ以外の影響は人が確かめてください。`,
+    };
+  }
   if (isJudge(file)) {
     return {
       level: "warning",
@@ -415,7 +436,8 @@ const settingChange = (
  * Warn about changed files that decide what mutation testing checks.
  *
  * Editing mutator's settings can narrow the check or record a mutant that
- * changes behaviour as equivalent. Editing the Vitest config or a setup file
+ * changes behaviour as equivalent. Editing `tsconfig*.json` can turn mutants
+ * into `CompileError`. Editing the Vitest config or a setup file
  * (`testSetupFiles`, the resolved `setupFiles` / `globalSetup`) can make
  * every assertion pass. Editing the review or what runs it can switch it
  * off. No test fails because of any of them, so a person has to look.
@@ -476,8 +498,20 @@ export const reviewNotRun = (output: string): readonly string[] => {
 
 /** Statuses that count as undetected. */
 const UNDETECTED = new Set(["Survived", "NoCoverage"]);
-/** Statuses that count as detected. */
-const DETECTED = new Set(["Killed", "Timeout"]);
+/**
+ * Statuses that count as detected when a mutant runs again with `--only`.
+ * `RuntimeError` is detected for mutator as well (`isDetected` in
+ * node_modules/@mizchi/mutator/src/status.ts). `CompileError` means the
+ * mutant no longer type-checks: a change to the types of the source (a
+ * narrower annotation, say) turns a mutant the tests killed into one the
+ * compiler rejects, which weakens no test.
+ */
+const RERUN_DETECTED = new Set([
+  "Killed",
+  "Timeout",
+  "RuntimeError",
+  "CompileError",
+]);
 
 const isFormat2 = (
   snapshot: unknown,
@@ -628,8 +662,10 @@ export const unselectedCandidates = (
 
 /**
  * Errors for the mutants `unselectedCandidates` picked, from the report of
- * running them with `--only`: one per mutant no test detects now, and one
- * per mutant whose status is neither detected nor undetected.
+ * running them with `--only`: one per mutant no test detects now
+ * (`Survived`, `NoCoverage`), and one per mutant whose status says nothing
+ * about detection (`Ignored`, `Pending`, or no result). `Killed`, `Timeout`,
+ * `RuntimeError` and `CompileError` pass.
  */
 export const reviewUnselected = (
   base: MutationReport,
@@ -639,7 +675,7 @@ export const reviewUnselected = (
   const now = mutantsById(rerun);
   return keys.flatMap((key) => {
     const status = now.get(key)?.status;
-    if (DETECTED.has(status ?? "")) {
+    if (RERUN_DETECTED.has(status ?? "")) {
       return [];
     }
     const { change, place } = placeMutant(base, key);
@@ -688,16 +724,19 @@ export const reviewPending = (
 };
 
 /**
- * Errors for the mutants a change of mutator's settings takes out of the
- * check while a touched test detected them.
+ * Errors for the mutants a change of the settings takes out of the check
+ * while a touched test detected them.
  *
- * `ownSettings` is the baseline run with the base's own settings,
+ * `ownSettings` is the baseline run with the base's own files (mutator's
+ * settings, `tsconfig*.json`, the Vitest config and its setup files),
  * `newSettings` the baseline run with the current ones. A mutant killed in
- * the first and not detected or missing in the second disappeared because
- * of the settings (`excludedMutators`, `weakMutation`, `arid`, a plugin, and
- * so on), so the baseline and the change both lack it. When a touched test
- * killed it, weakening that test would go unnoticed. Other mutants the
- * settings drop are left to the warning about the changed settings.
+ * the first and not killed or missing in the second disappeared because of
+ * those files (`excludedMutators`, `weakMutation`, a stricter tsconfig that
+ * turns it into a `CompileError`, and so on), so the baseline and the change
+ * both lack it. When a touched test killed it, weakening that test would go
+ * unnoticed. `Timeout` in the second counts as dropped too: mutator compares
+ * `Killed` only. Other mutants the files drop are left to the warning about
+ * the changed settings.
  */
 export const reviewSettingDrops = (
   ownSettings: MutationReport,
@@ -709,7 +748,7 @@ export const reviewSettingDrops = (
     .filter(
       (mutant) =>
         mutant.status === "Killed" &&
-        !DETECTED.has(kept.get(mutant.id)?.status ?? "") &&
+        kept.get(mutant.id)?.status !== "Killed" &&
         mutant.killedBy.some(touched),
     )
     .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
@@ -723,7 +762,7 @@ export const reviewSettingDrops = (
       return formatAnnotation({
         level: "error",
         title: "設定の変更で、変えたテストが確かめるミュータントが外れた",
-        message: `ミュータント${mutant.id}${change}は、基準の元の設定では${killers}が検出していましたが、今のmutatorの設定では${now === undefined ? "作られません" : `${now}になります`}。変えたか消したテストが検出していたミュータントを設定で外すと、そのテストを弱めても見つかりません。設定を戻すか、テストの変更を戻してください。`,
+        message: `ミュータント${mutant.id}${change}は、基準の元の設定では${killers}が検出していましたが、今の設定（mutatorの設定、tsconfig*.json、Vitestの設定と準備ファイル）では${now === undefined ? "作られません" : `${now}になります`}。変えたか消したテストが検出していたミュータントを設定で外すと、そのテストを弱めても見つかりません。設定を戻すか、テストの変更を戻してください。テストを弱めていなくても、テストが読み込むソースを同じPRで変えると、そのテストは変えたテストに数えられます。その時は設定の変更を別のPRに分けてください。`,
         ...place,
       });
     });
@@ -764,12 +803,65 @@ export const reviewFindings = (report: MutationReport): Review => {
     )
     .map((finding) => gap(report, finding));
   return {
-    lines: [
-      ...[...regressions, ...idle, ...gaps, ...uncollected(report)].map(
-        formatAnnotation,
-      ),
-      `テストが弱くなった箇所: ${regressions.length}件、何も検出しない新しいテスト: ${idle.length}件、テストが検出できないミュータント: ${gaps.length}件`,
-    ],
+    lines: [...regressions, ...idle, ...gaps, ...uncollected(report)].map(
+      formatAnnotation,
+    ),
     exitCode: regressions.length === 0 ? 0 : 1,
   };
+};
+
+/** The level and title of each annotation in `lines`, in order. */
+const annotationsOf = (
+  lines: readonly string[],
+): readonly { readonly level: string; readonly title: string }[] =>
+  lines.flatMap((line) => {
+    const match = /^::(error|warning)\b[^:]*?title=([^,:]*)/u.exec(line);
+    return match === null
+      ? []
+      : [
+          {
+            level: match[1] ?? "",
+            title: unescapeProperty(match[2] ?? ""),
+          },
+        ];
+  });
+
+const countByTitle = (titles: readonly string[]): string =>
+  [...Map.groupBy(titles, (title) => title)]
+    .map(([title, same]) => `「${title}」${same.length}件`)
+    .join("、");
+
+/** An error for a run that failed without saying why in an annotation. */
+const UNEXPLAINED = formatAnnotation({
+  level: "error",
+  title: "判定が途中で止まった",
+  message:
+    "scripts/mutation-diff.shが、エラーの注釈を出さずに失敗しました。上の出力を確かめてください。",
+});
+
+/**
+ * The closing lines of the whole review: the annotations every step wrote
+ * (`lines`, the output of the run), counted by level and title, once at the
+ * end. A run that exits non-zero without an error annotation gets one, so
+ * the count never reads 0 errors for a failure.
+ */
+export const summarize = (
+  lines: readonly string[],
+  exitCode: number,
+): readonly string[] => {
+  const found = annotationsOf(lines);
+  const extra = exitCode !== 0 && !found.some((a) => a.level === "error");
+  const all = extra ? [...found, ...annotationsOf([UNEXPLAINED])] : found;
+  const titles = (level: string): readonly string[] =>
+    all.filter((a) => a.level === level).map((a) => a.title);
+  const part = (label: string, level: string): string => {
+    const same = titles(level);
+    return same.length === 0
+      ? `${label}0件`
+      : `${label}${same.length}件（${countByTitle(same)}）`;
+  };
+  return [
+    ...(extra ? [UNEXPLAINED] : []),
+    `mutation:diffの結果: ${exitCode === 0 ? "通過" : "失敗"}。${part("エラー", "error")}、${part("警告", "warning")}`,
+  ];
 };

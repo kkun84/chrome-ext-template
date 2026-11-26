@@ -20,15 +20,22 @@
 #    leave no mutant Pending: `timeBudget` or `mutantsPerLine` in the settings
 #    would cut it short and leave no Killed to compare with, so a Pending
 #    mutant fails. `since` and `shard`, which no flag can undo, fail before
-#    the run (scripts/mutation-scope.ts full-run). The reporters and the
-#    report directory are given on the command line, so the settings cannot
-#    move or drop the report.
-# 3b. When mutator's settings changed, run every mutant there again with the
-#    base's own settings. scripts/mutation-unselected.ts fails when a mutant
-#    the new settings take out (excludedMutators, weakMutation, ...) was
-#    killed by a changed or removed test: the baseline made with the new
-#    settings lacks it as well, so weakening that test would look like
-#    nothing.
+#    the run (scripts/mutation-scope.ts full-run), and so do runner,
+#    vitestConfig, jestConfig and playwrightConfig (mutator would collect
+#    tests apart from vitest.config.*, which step 4 reads) and sharedCache
+#    (the baseline and the change would share .git/mutator/). The reporters
+#    and the report directory are given on the command line, so the
+#    settings cannot move or drop the report.
+# 3b. When a file copied in step 2 that decides which mutants exist and how
+#    they end (mutator.config.*, tsconfig*.json, vitest.config.* and the
+#    Vitest files of the base or of this checkout) differs from the merge
+#    base, put the merge base's versions back in the worktree and run every
+#    mutant there again. scripts/mutation-unselected.ts fails when a mutant
+#    the new files take out (excludedMutators, weakMutation, a tsconfig
+#    option that turns it into a CompileError, ...) was killed by a changed
+#    or removed test: the baseline made with the new files lacks it as well,
+#    so weakening that test would look like nothing. package.json and the
+#    lockfile stay as they are: the base's dependencies are not installed.
 # 4. With the base's own Vitest and mutator settings, list the test files
 #    Vitest collected and the files mutator mutated at the base. Fail when one
 #    still exists (under its new name after a rename) but the current
@@ -48,6 +55,11 @@
 #    at module level is covered by no test, so --include-test-changes misses
 #    it). A test whose file, or a file it loads (a helper), changed counts as
 #    changed.
+#
+# Every annotation the steps print is also kept in a log, and the last line
+# of the run counts them all, whichever step wrote them (check-mutation-
+# findings.ts --summary). A run that fails without an error annotation gets
+# one there.
 #
 # Exit codes: 0 when the tests kept their strength. 1 when the tests got
 # weaker or left out, when mutants of the diff were not run, when no baseline
@@ -147,10 +159,21 @@ esac
 work=$(mktemp -d "${TMPDIR:-/tmp}/mutation-base.XXXXXX")
 tree="$work/tree"
 printf '%s\n%s\n' "$$" "$work" >"$lock"
-# Remove the worktree however the script ends, and empty the lock file. The
-# worktree's node_modules is untracked, hence --force. The lock itself goes
-# with fd 9 when the process exits.
-trap 'git -C "$root" worktree remove --force "$tree" >/dev/null 2>&1 || true
+# Every annotation goes to the log as well, for the count at the end.
+log="$work/annotations.log"
+: >"$log"
+annotate() {
+  echo "$1"
+  echo "$1" >>"$log"
+}
+
+# However the script ends, count the annotations, remove the worktree and
+# empty the lock file. The worktree's node_modules is untracked, hence
+# --force. The lock itself goes with fd 9 when the process exits.
+trap 'status=$?
+node --experimental-strip-types --disable-warning=ExperimentalWarning \
+  "$root/scripts/check-mutation-findings.ts" --summary "$log" "$status" || true
+git -C "$root" worktree remove --force "$tree" >/dev/null 2>&1 || true
 rm -rf "$work"
 git -C "$root" worktree prune
 : >"$lock"' EXIT
@@ -166,7 +189,7 @@ escape_data() {
 no_baseline() {
   local excerpt
   excerpt=$(grep -v '^[[:space:]]*$' "$work/baseline.log" | tail -n 8 | cut -c1-300 || true)
-  echo "::error title=ミューテーションテストの基準を作れない::$(escape_data "${merge_base}（${base}との共通の祖先）で$1。テストが弱くなったかを確かめられないため、失敗にします。依存を更新してテストが壊れたなら、まず通常のテスト（pnpm test）を直してください。VitestのsetupFiles / globalSetupや、テストが読む設定ファイルを足したなら、上の「mutation:diff: copied」の行にそれが入っているかを確かめ、入っていなければscripts/mutation-diff.shが基準へ写すファイルに足してください。出力の末尾:
+  annotate "::error title=ミューテーションテストの基準を作れない::$(escape_data "${merge_base}（${base}との共通の祖先）で$1。テストが弱くなったかを確かめられないため、失敗にします。依存を更新してテストが壊れたなら、まず通常のテスト（pnpm test）を直してください。VitestのsetupFiles / globalSetupや、テストが読む設定ファイルを足したなら、上の「mutation:diff: copied」の行にそれが入っているかを確かめ、入っていなければscripts/mutation-diff.shが基準へ写すファイルに足してください。出力の末尾:
 ${excerpt}")"
   echo "--- baseline log (last 40 lines) ---" >&2
   tail -n 40 "$work/baseline.log" >&2 || true
@@ -187,11 +210,12 @@ scope() {
     "$root/scripts/mutation-scope.ts" "$@"
 }
 if ! scope list --root "$root" >"$work/current.json" 2>"$work/scope.log"; then
-  echo "::error title=テストの設定を読めない::$(escape_data "scripts/mutation-scope.tsが失敗しました: $(tail -n 5 "$work/scope.log")")"
+  annotate "::error title=テストの設定を読めない::$(escape_data "scripts/mutation-scope.tsが失敗しました: $(tail -n 5 "$work/scope.log")")"
   exit 1
 fi
 # since and shard would make the baseline a partial run; no flag undoes them.
-if ! scope full-run --root "$root"; then
+# The other settings it rejects are in the header.
+if ! scope full-run --root "$root" | tee -a "$log"; then
   exit 1
 fi
 mapfile -t vitest_files < <(node -e 'for (const f of JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")).configFiles) console.log(f)' "$work/current.json")
@@ -202,6 +226,14 @@ shopt -s nullglob
 for file in "$tree"/vitest.config.* "$tree"/mutator.config.*; do
   cp "$file" "$work/base-config/"
 done
+# The files of step 3b, at the base and here. The Vitest files of the base
+# are added after step 4.
+env_files=()
+for file in "$tree"/tsconfig*.json "$tree"/vitest.config.* "$tree"/mutator.config.* \
+  tsconfig*.json vitest.config.* mutator.config.*; do
+  env_files+=("${file#"$tree"/}")
+done
+env_files+=("${vitest_files[@]}")
 
 # The files in mutator's environment hash, plus .npmrc, which decides how the
 # baseline installs.
@@ -247,7 +279,7 @@ unselected() {
     "$root/scripts/mutation-unselected.ts" "$@"
 }
 # A baseline cut short has no Killed to compare with.
-if ! unselected --pending "$work/base-report.json" "基準の全件の実行"; then
+if ! unselected --pending "$work/base-report.json" "基準の全件の実行" | tee -a "$log"; then
   exit 1
 fi
 
@@ -282,47 +314,54 @@ if ! scope list --root "$tree" --vitest-config "$base_vitest" --mutator-config "
   no_baseline "基準の設定で、テストファイルとミューテーションテストの対象を一覧にできません"
 fi
 scope_status=0
-scope compare "$work/base.json" "$work/current.json" "$merge_base" || scope_status=$?
+scope compare "$work/base.json" "$work/current.json" "$merge_base" | tee -a "$log" || scope_status=$?
+mapfile -t base_vitest_files < <(node -e 'for (const f of JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")).configFiles) if (!f.startsWith(".mutation-base-")) console.log(f)' "$work/base.json")
+env_files+=("${base_vitest_files[@]}")
 
 # Only the snapshots: scopes/*.json and snapshot.json. Reports, the resume
 # checkpoints and the old .mutator of this checkout are dropped.
 rm -rf .mutator
 mkdir -p .mutator/scopes
+shopt -s nullglob
 for snapshot in "$tree"/.mutator/scopes/*.json; do cp "$snapshot" .mutator/scopes/; done
+shopt -u nullglob
 if [ -f "$tree/.mutator/snapshot.json" ]; then cp "$tree/.mutator/snapshot.json" .mutator/; fi
 
-# The first mutator config file present, as mutator picks it, or nothing.
-first_mutator_config() {
-  local name
-  for name in mutator.config.ts mutator.config.mts mutator.config.mjs \
-    mutator.config.js mutator.config.json; do
-    if [ -f "$1/$name" ]; then
-      echo "$1/$name"
-      return
+# Whether a file differs between the merge base and this checkout, counting
+# a file present on one side only.
+differs() {
+  if git cat-file -e "${merge_base}:$1" 2>/dev/null; then
+    [ ! -f "$1" ] || ! git show "${merge_base}:$1" | cmp -s - "$1"
+  else
+    [ -f "$1" ]
+  fi
+}
+mapfile -t env_files < <(printf '%s\n' "${env_files[@]}" | sort -u)
+changed_env=()
+for file in "${env_files[@]}"; do
+  if differs "$file"; then changed_env+=("$file"); fi
+done
+if [ "${#changed_env[@]}" -gt 0 ]; then
+  # Step 3b: the worktree gets the base's own files back.
+  echo "mutation:diff: ${changed_env[*]} changed; running every mutant at ${merge_base} with the base's own files"
+  for file in "${env_files[@]}"; do
+    if git cat-file -e "${merge_base}:${file}" 2>/dev/null; then
+      git -C "$tree" checkout --quiet "$merge_base" -- "$file"
+    else
+      rm -f "${tree:?}/$file"
     fi
   done
-}
-base_config_file=$(first_mutator_config "$work/base-config")
-current_config_file=$(first_mutator_config "$root")
-if [ "${base_config_file##*/}" != "${current_config_file##*/}" ] ||
-  { [ -n "$base_config_file" ] && ! cmp -s "$base_config_file" "$current_config_file"; }; then
-  # Step 3b. Without a config at the base, mutator's defaults: an empty one.
-  own_config=$base_mutator
-  if [ "$own_config" = none ]; then
-    own_config="$tree/.mutation-base-mutator.json"
-    echo '{}' >"$own_config"
-  fi
-  echo "mutation:diff: mutator's settings changed; running every mutant at ${merge_base} with the base's own settings"
-  if ! scope full-run --root "$tree" --mutator-config "$own_config"; then
+  if ! scope full-run --root "$tree" | tee -a "$log"; then
     exit 1
   fi
   rm -rf "$tree/.mutator"
-  if ! (cd "$tree" && GITHUB_ACTIONS='' pnpm exec mutator --config-file "$own_config" \
-    --reporter json --report-dir "$work/base-own") >>"$work/baseline.log" 2>&1 ||
-    ! cp "$work/base-own/mutation.json" "$work/base-own-report.json"; then
-    no_baseline "基準の元のmutatorの設定で、全件のミューテーションテストが失敗しました"
+  if ! (cd "$tree" && GITHUB_ACTIONS='' pnpm exec mutator --reporter json \
+    --report-dir "$work/base-own") >>"$work/baseline.log" 2>&1 ||
+    ! cp "$work/base-own/mutation.json" "$work/base-own-report.json" ||
+    ! cp "$tree/.mutator/snapshot.json" "$work/base-own-snapshot.json"; then
+    no_baseline "基準の元の設定（mutatorの設定、tsconfig*.json、Vitestの設定と準備ファイル）で、全件のミューテーションテストが失敗しました"
   fi
-  if ! unselected --pending "$work/base-own-report.json" "基準の元の設定での全件の実行"; then
+  if ! unselected --pending "$work/base-own-report.json" "基準の元の設定での全件の実行" | tee -a "$log"; then
     exit 1
   fi
 fi
@@ -332,7 +371,7 @@ fi
 if ! GITHUB_ACTIONS='' pnpm exec mutator --since "$merge_base" --include-test-changes \
   --kill-matrix --reporter text --reporter json --report-dir .mutator/report \
   2>&1 | tee "$work/diff.log"; then
-  echo "::error title=ミューテーションテストが失敗した::mutator --since ${merge_base}が失敗しました。上の出力を確かめてください。"
+  annotate "::error title=ミューテーションテストが失敗した::mutator --since ${merge_base}が失敗しました。上の出力を確かめてください。"
   exit 1
 fi
 watch_args=()
@@ -340,8 +379,8 @@ for file in "${vitest_files[@]}"; do watch_args+=(--watch "$file"); done
 status=0
 node --experimental-strip-types --disable-warning=ExperimentalWarning \
   scripts/check-mutation-findings.ts "$merge_base" "${watch_args[@]}" \
-  --mutator-output "$work/diff.log" || status=$?
-unselected "$work" "$merge_base" || status=1
+  --mutator-output "$work/diff.log" --no-summary | tee -a "$log" || status=$?
+unselected "$work" "$merge_base" | tee -a "$log" || status=1
 echo "mutation:diff: done in $(($(date +%s) - started))s"
 if [ "$scope_status" -ne 0 ]; then exit 1; fi
 exit "$status"
