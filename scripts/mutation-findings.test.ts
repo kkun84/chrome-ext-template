@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
+  crossCheckRegressions,
   decodeReport,
   formatAnnotation,
   type MutationReport,
@@ -159,6 +160,116 @@ describe("reviewFindings", () => {
   });
 });
 
+describe("crossCheckRegressions", () => {
+  const mutant = (id: string, status: string, killedBy: string[] = []) => ({
+    id,
+    mutatorName: "BooleanLiteral",
+    replacement: "true",
+    location: { start: { line: 3, column: 1 } },
+    status,
+    killedBy,
+  });
+  const reportOf = (source: string, mutants: readonly unknown[]) =>
+    report({
+      ...base,
+      findings: [],
+      files: { "src/core/a.ts": { source, mutants } },
+    });
+
+  it("reports a mutant of an unchanged file that was killed or timed out and is undetected now", () => {
+    const before = reportOf("code", [
+      mutant("timeout", "Timeout"),
+      mutant("killed", "Killed", ["src/core/a.test.ts#a"]),
+      mutant("survived", "Survived"),
+      mutant("still", "Killed", ["src/core/a.test.ts#a"]),
+    ]);
+    const after = reportOf("code", [
+      mutant("timeout", "NoCoverage"),
+      mutant("killed", "Survived"),
+      mutant("survived", "Survived"),
+      mutant("still", "Killed", ["src/core/a.test.ts#b"]),
+    ]);
+    expect(crossCheckRegressions(before, after)).toEqual([
+      { kind: "detectionRegression", key: "timeout", previousKillers: [] },
+      {
+        kind: "detectionRegression",
+        key: "killed",
+        previousKillers: ["src/core/a.test.ts#a"],
+      },
+    ]);
+  });
+
+  it("counts a baseline timeout only when the change can explain the loss", () => {
+    const before = reportOf("code", [
+      mutant("covered", "Timeout"),
+      mutant("changed", "Timeout"),
+    ]);
+    const after = report({
+      ...base,
+      findings: [],
+      testChanges: {
+        added: [],
+        changed: ["src/core/a.test.ts#t"],
+        removed: [],
+      },
+      files: {
+        "src/core/a.ts": {
+          source: "code",
+          mutants: [
+            {
+              ...mutant("covered", "Survived"),
+              coveredBy: ["src/core/a.test.ts#u"],
+            },
+            {
+              ...mutant("changed", "Survived"),
+              coveredBy: ["src/core/a.test.ts#t"],
+            },
+          ],
+        },
+      },
+    });
+    expect(crossCheckRegressions(before, after).map((f) => f.key)).toEqual([
+      "changed",
+    ]);
+  });
+
+  it("skips files whose source changed", () => {
+    expect(
+      crossCheckRegressions(
+        reportOf("old", [mutant("m", "Killed")]),
+        reportOf("new", [mutant("m", "Survived")]),
+      ),
+    ).toEqual([]);
+  });
+
+  it("fails the review with one error per mutant that mutator also reports", () => {
+    const before = reportOf("code", [
+      mutant("m", "Timeout"),
+      mutant("n", "Killed"),
+    ]);
+    const after = report({
+      ...base,
+      findings: [
+        { kind: "detectionRegression", key: "n", previousKillers: [] },
+      ],
+      files: {
+        "src/core/a.ts": {
+          source: "code",
+          mutants: [mutant("m", "NoCoverage"), mutant("n", "NoCoverage")],
+        },
+      },
+    });
+    const review = reviewFindings(after, before);
+    expect(review.exitCode).toBe(1);
+    expect(
+      review.lines.filter((line) => line.startsWith("::error")),
+    ).toHaveLength(2);
+    expect(review.lines.at(-1)).toBe(
+      "テストが弱くなった箇所: 2件、何も検出しない新しいテスト: 0件、テストが検出できないミュータント: 0件",
+    );
+  });
+});
+
 describe("decodeReport", () => {
   it.each([
     [[], "JSONのオブジェクトではありません。"],
@@ -203,6 +314,9 @@ describe("decodeReport", () => {
           ["a.ts", []],
           ["b.ts", []],
         ]),
+        sources: new Map(),
+        changedTests: [],
+        removedTests: [],
       },
     });
   });

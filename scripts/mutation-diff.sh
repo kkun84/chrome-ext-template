@@ -24,7 +24,10 @@
 #    baseline and the change alike, so nothing would look weaker.
 # 5. Replace this checkout's .mutator with the baseline's snapshots, run the
 #    mutants of the diff and of the changed tests, and review the report with
-#    scripts/check-mutation-findings.ts.
+#    scripts/check-mutation-findings.ts. Besides mutator's own regressions, it
+#    compares the baseline's report with the current one: mutator counts only
+#    a `Killed` baseline verdict, and a busy machine can turn one into
+#    `Timeout`.
 #
 # Exit codes: 0 when the tests kept their strength. 1 when the tests got
 # weaker or left out, when no baseline could be made (e.g. the base's tests fail with this
@@ -166,6 +169,10 @@ if ! (cd "$tree" && GITHUB_ACTIONS='' pnpm exec mutator --reporter json) >>"$wor
   no_baseline "全件のミューテーションテストが失敗しました（今の依存でベースのテストが落ちる、など）"
 fi
 echo "mutation:diff: baseline made in $(($(date +%s) - started))s"
+# The baseline's own report, for the cross-check in check-mutation-findings.ts.
+if ! cp "$tree/.mutator/report/mutation.json" "$work/base-report.json"; then
+  no_baseline "基準のレポート（.mutator/report/mutation.json）がありません"
+fi
 
 # What the base collected with its own settings. The saved config files go
 # back into the worktree under other names, so their imports still resolve
@@ -210,7 +217,8 @@ watch_args=()
 for file in "${vitest_files[@]}"; do watch_args+=(--watch "$file"); done
 status=0
 node --experimental-strip-types --disable-warning=ExperimentalWarning \
-  scripts/check-mutation-findings.ts "$merge_base" "${watch_args[@]}" || status=$?
+  scripts/check-mutation-findings.ts "$merge_base" "${watch_args[@]}" \
+  --base-report "$work/base-report.json" || status=$?
 echo "mutation:diff: done in $(($(date +%s) - started))s"
 if [ "$scope_status" -ne 0 ]; then exit 1; fi
 exit "$status"

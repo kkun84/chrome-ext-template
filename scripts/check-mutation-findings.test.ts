@@ -116,6 +116,49 @@ describe("run", () => {
     expect(output.trimEnd().split("\n")).toHaveLength(1);
   });
 
+  it("fails on a regression found only by comparing with the baseline's report", () => {
+    const mutant = (status: string) => ({
+      id: "m",
+      mutatorName: "BooleanLiteral",
+      replacement: "true",
+      location: { start: { line: 2, column: 1 } },
+      status,
+      killedBy: [],
+      coveredBy: [],
+    });
+    const reportWith = (status: string) => ({
+      schemaVersion: "2",
+      comparison: "available",
+      findings: [],
+      files: { "src/core/a.ts": { source: "code", mutants: [mutant(status)] } },
+    });
+    writeReport(reportWith("NoCoverage"));
+    write("base.json", JSON.stringify(reportWith("Timeout")));
+    const { output, exitCode } = run(
+      ["--base-report", join(root, "base.json")],
+      root,
+    );
+    expect(exitCode).toBe(1);
+    expect(output).toMatch(
+      /^::error file=src\/core\/a\.ts,line=2,title=テストが弱くなった::/,
+    );
+  });
+
+  it("exits 1 when the baseline's report cannot be read", () => {
+    writeReport({
+      schemaVersion: "2",
+      comparison: "available",
+      findings: [],
+      files: {},
+    });
+    const { output, exitCode } = run(
+      ["--base-report", join(root, "missing.json")],
+      root,
+    );
+    expect(exitCode).toBe(1);
+    expect(output).toContain("基準のレポート");
+  });
+
   it("warns about mutator settings changed since the base ref", () => {
     writeReport({
       schemaVersion: "2",

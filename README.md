@@ -283,6 +283,12 @@ pnpm mutation:findings # 直前の結果（.mutator/report/mutation.json）か�
 5. 作業ツリーの`.mutator`を捨てて基準のsnapshotに置き換え、
    `mutator --since <共通の祖先> --include-test-changes --kill-matrix`で差分と、変更したテストが確かめる
    コードのミュータントを実行し、`scripts/check-mutation-findings.ts`で判定する。worktreeは最後に消す。
+   判定では、mutatorの`detectionRegression`に加えて、基準と今のレポートを突き合わせる。ソースが変わって
+   いないファイルのミュータントで、基準では`Killed`だったのに今は`Survived`か`NoCoverage`のものも、
+   テストが弱くなったとして失敗にする。基準が`Timeout`のものは、今`NoCoverage`になった、覆うテストが
+   変わった、またはテストを消した時に限って失敗にする。mutatorは基準が`Killed`の時だけ比べるので、マシンの
+   負荷が高く基準で`Timeout`になると見逃すため。`Timeout`には検出したテストが記録されず、負荷で検出しない
+   ミュータントが`Timeout`になることもあるので、変更で説明できる時だけに絞っている。
 
 - 基準を作れない時（worktreeの準備や依存の導入に失敗した、ベースのテストが今の環境で落ちる、など）も
   失敗にします。通すと、ベースのテストを動かなくする変更とテストを消す変更を同時に入れた時に見逃すため

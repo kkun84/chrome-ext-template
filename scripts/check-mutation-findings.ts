@@ -4,7 +4,8 @@
  *
  * Usage:
  *   node --experimental-strip-types --disable-warning=ExperimentalWarning \
- *     scripts/check-mutation-findings.ts [base-ref] [--watch <file>]...
+ *     scripts/check-mutation-findings.ts [base-ref] [--watch <file>]... \
+ *     [--base-report <mutation.json>]
  *
  * Reads `.mutator/report/mutation.json` from the last mutator run and prints
  * GitHub Actions annotations: an error for each mutant the tests detected
@@ -12,9 +13,12 @@
  * nothing and for each mutant no test detects. With a base ref (e.g.
  * `origin/main`) it also warns about changed `mutator.config.*` /
  * `mutator.accepted.json`, `vitest.config.*` and each `--watch` file (the
- * Vitest setup files) since that ref. Exits 1 when the tests got weaker,
- * when mutator had no baseline to compare with, or when the report or the ref
- * cannot be read. `scripts/mutation-diff.sh` makes the baseline and runs this.
+ * Vitest setup files) since that ref. `--base-report` is the baseline run's
+ * report: a mutant of an unchanged file that the baseline detected (`Killed`
+ * or `Timeout`) and nothing detects now is a regression even when mutator
+ * does not report it. Exits 1 when the tests got weaker, when mutator had no
+ * baseline to compare with, or when a report or the ref cannot be read.
+ * `scripts/mutation-diff.sh` makes the baseline and runs this.
  */
 
 import { execFileSync } from "node:child_process";
@@ -24,6 +28,7 @@ import { fileURLToPath } from "node:url";
 import {
   decodeReport,
   failure,
+  type MutationReport,
   type Review,
   reviewFindings,
   reviewSettingChanges,
@@ -41,37 +46,61 @@ const isMissing = (error: unknown): boolean =>
 const reasonOf = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
-const reviewReport = (root: string): Review => {
+/** The decoded report at `path`, or a failing review that says why not. */
+const loadReport = (
+  path: string,
+  label: string,
+): { readonly report: MutationReport } | { readonly review: Review } => {
   let text: string;
   try {
-    text = readFileSync(join(root, REPORT_PATH), "utf8");
+    text = readFileSync(path, "utf8");
   } catch (error) {
-    return isMissing(error)
-      ? failure(
-          "ミューテーションテストの結果が無い",
-          `${REPORT_PATH}がありません。先にpnpm mutation:diffを実行してください。`,
-        )
-      : failure(
-          "ミューテーションテストの結果を読めない",
-          `${REPORT_PATH}を読めません: ${reasonOf(error)}`,
-        );
+    return {
+      review: isMissing(error)
+        ? failure(
+            "ミューテーションテストの結果が無い",
+            `${label}がありません。先にpnpm mutation:diffを実行してください。`,
+          )
+        : failure(
+            "ミューテーションテストの結果を読めない",
+            `${label}を読めません: ${reasonOf(error)}`,
+          ),
+    };
   }
   let value: unknown;
   try {
     value = JSON.parse(text);
   } catch (error) {
-    return failure(
-      "ミューテーションテストの結果を読めない",
-      `${REPORT_PATH}がJSONとして読めません: ${reasonOf(error)}`,
-    );
+    return {
+      review: failure(
+        "ミューテーションテストの結果を読めない",
+        `${label}がJSONとして読めません: ${reasonOf(error)}`,
+      ),
+    };
   }
   const decoded = decodeReport(value);
   return "problem" in decoded
-    ? failure(
-        "ミューテーションテストの結果の形が違う",
-        `${REPORT_PATH}は想定したmutator 0.4のレポートではありません: ${decoded.problem}`,
-      )
-    : reviewFindings(decoded.report);
+    ? {
+        review: failure(
+          "ミューテーションテストの結果の形が違う",
+          `${label}は想定したmutator 0.4のレポートではありません: ${decoded.problem}`,
+        ),
+      }
+    : decoded;
+};
+
+const reviewReport = (root: string, basePath: string | undefined): Review => {
+  const current = loadReport(join(root, REPORT_PATH), REPORT_PATH);
+  if ("review" in current) {
+    return current.review;
+  }
+  if (basePath === undefined) {
+    return reviewFindings(current.report);
+  }
+  const base = loadReport(basePath, `基準のレポート${basePath}`);
+  return "review" in base
+    ? base.review
+    : reviewFindings(current.report, base.report);
 };
 
 const changedFiles = (
@@ -97,11 +126,13 @@ export const run = (
   args: readonly string[],
   root: string = REPO_ROOT,
 ): { output: string; exitCode: number } => {
-  const watched = args.flatMap((arg, index) =>
-    args[index - 1] === "--watch" ? [arg] : [],
-  );
+  const valued = new Set(["--watch", "--base-report"]);
+  const values = (name: string): readonly string[] =>
+    args.flatMap((arg, index) => (args[index - 1] === name ? [arg] : []));
+  const watched = values("--watch");
+  const basePath = values("--base-report")[0];
   const base = args.find(
-    (arg, index) => !arg.startsWith("--") && args[index - 1] !== "--watch",
+    (arg, index) => !arg.startsWith("--") && !valued.has(args[index - 1] ?? ""),
   );
   const changed = base === undefined ? { files: [] } : changedFiles(root, base);
   const review =
@@ -110,7 +141,7 @@ export const run = (
           "基準のrefと比べられない",
           `${base}...HEADの差分を取れません。refの名前と、履歴を取得しているか（CIではfetch-depth: 0）を確かめてください: ${changed.problem}`,
         )
-      : reviewReport(root);
+      : reviewReport(root, basePath);
   const settings =
     "problem" in changed ? [] : reviewSettingChanges(changed.files, watched);
   return {

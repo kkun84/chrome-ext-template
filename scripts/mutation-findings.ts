@@ -22,6 +22,10 @@ export interface MutantRecord {
   readonly mutatorName?: string;
   readonly replacement?: string;
   readonly start?: MutantLocation;
+  /** `Killed`, `Survived`, `NoCoverage`, `Timeout`, `Pending`, ... */
+  readonly status?: string;
+  readonly killedBy: readonly string[];
+  readonly coveredBy: readonly string[];
 }
 
 /** One entry of the report's `findings`. */
@@ -39,6 +43,11 @@ export interface MutationReport {
   readonly findings: readonly MutationFinding[];
   /** Mutants per source file, keyed by the path relative to the root. */
   readonly files: ReadonlyMap<string, readonly MutantRecord[]>;
+  /** The source of each file when the report was written. */
+  readonly sources: ReadonlyMap<string, string>;
+  /** Test ids changed and removed since the baseline (`testChanges`). */
+  readonly changedTests: readonly string[];
+  readonly removedTests: readonly string[];
 }
 
 /** A decoded report, or why the value is not a report this script reads. */
@@ -76,7 +85,14 @@ type ReportField =
   | "kind"
   | "key"
   | "test"
-  | "previousKillers";
+  | "previousKillers"
+  | "source"
+  | "status"
+  | "killedBy"
+  | "coveredBy"
+  | "testChanges"
+  | "changed"
+  | "removed";
 
 type JsonObject = { readonly [field in ReportField]?: unknown };
 
@@ -104,6 +120,11 @@ const decodeLocation = (value: unknown): { start?: MutantLocation } => {
   return { start: typeof line === "number" ? { line } : {} };
 };
 
+const strings = (value: unknown): readonly string[] =>
+  Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
+
 const decodeMutant = (value: unknown): readonly MutantRecord[] => {
   if (!isObject(value) || typeof value.id !== "string") {
     return [];
@@ -113,7 +134,10 @@ const decodeMutant = (value: unknown): readonly MutantRecord[] => {
       id: value.id,
       ...stringField(value, "mutatorName"),
       ...stringField(value, "replacement"),
+      ...stringField(value, "status"),
       ...decodeLocation(value.location),
+      killedBy: strings(value.killedBy),
+      coveredBy: strings(value.coveredBy),
     },
   ];
 };
@@ -122,18 +146,31 @@ const decodeFinding = (value: unknown): readonly MutationFinding[] => {
   if (!isObject(value) || typeof value.kind !== "string") {
     return [];
   }
-  const killers = value.previousKillers;
   return [
     {
       kind: value.kind,
       ...stringField(value, "key"),
       ...stringField(value, "test"),
-      previousKillers: Array.isArray(killers)
-        ? killers.filter((killer) => typeof killer === "string")
-        : [],
+      previousKillers: strings(value.previousKillers),
     },
   ];
 };
+
+const decodeSources = (value: JsonObject): ReadonlyMap<string, string> =>
+  new Map(
+    Object.entries(value).flatMap(([file, entry]) =>
+      isObject(entry) && typeof entry.source === "string"
+        ? [[file, entry.source] as const]
+        : [],
+    ),
+  );
+
+const decodeTestChanges = (
+  value: unknown,
+): Pick<MutationReport, "changedTests" | "removedTests"> => ({
+  changedTests: isObject(value) ? strings(value.changed) : [],
+  removedTests: isObject(value) ? strings(value.removed) : [],
+});
 
 const decodeFiles = (
   value: JsonObject,
@@ -184,6 +221,8 @@ export const decodeReport = (value: unknown): DecodedReport => {
       comparison,
       findings: findings.flatMap(decodeFinding),
       files: decodeFiles(files),
+      sources: decodeSources(files),
+      ...decodeTestChanges(value.testChanges),
     },
   };
 };
@@ -352,19 +391,87 @@ export const reviewSettingChanges = (
   });
 };
 
+/** Statuses that count as undetected now. */
+const UNDETECTED = new Set(["Survived", "NoCoverage"]);
+
+/**
+ * Whether a mutant the baseline recorded as `Timeout` lost its detection.
+ *
+ * A `Timeout` carries no killing or covering tests, and a busy machine can
+ * time out a mutant no test detects. So it counts only when the change can
+ * explain the loss: no test reaches the mutant any more (a mutant no test
+ * reaches is never run, so it cannot have timed out before), a test that
+ * covers it changed, or the change removed tests.
+ */
+const lostTimeout = (current: MutationReport, mutant: MutantRecord): boolean =>
+  mutant.status === "NoCoverage" ||
+  current.removedTests.length > 0 ||
+  mutant.coveredBy.some((test) => current.changedTests.includes(test));
+
+/**
+ * Detection regressions found by comparing the baseline's report with the
+ * current one, for mutants of files whose source did not change.
+ *
+ * mutator reports a regression only when the baseline verdict was `Killed`.
+ * On a busy machine the baseline can record `Timeout` for a mutant a test
+ * detects, and the regression then goes unreported. An unchanged source means
+ * every function in the file is unchanged, which mutator requires too.
+ */
+export const crossCheckRegressions = (
+  base: MutationReport,
+  current: MutationReport,
+): readonly MutationFinding[] =>
+  [...current.files].flatMap(([file, mutants]) => {
+    const source = current.sources.get(file);
+    if (source === undefined || base.sources.get(file) !== source) {
+      return [];
+    }
+    const before = new Map(
+      (base.files.get(file) ?? []).map((mutant) => [mutant.id, mutant]),
+    );
+    return mutants.flatMap((mutant) => {
+      const old = before.get(mutant.id);
+      const lost =
+        old !== undefined &&
+        UNDETECTED.has(mutant.status ?? "") &&
+        (old.status === "Killed" ||
+          (old.status === "Timeout" && lostTimeout(current, mutant)));
+      return lost
+        ? [
+            {
+              kind: "detectionRegression",
+              key: mutant.id,
+              previousKillers: old.killedBy,
+            },
+          ]
+        : [];
+    });
+  });
+
 /**
  * Review the findings of a report.
  *
  * Fails when the report has a detection regression, or when mutator had no
- * baseline to compare with.
+ * baseline to compare with. With the baseline's own report, regressions are
+ * also found by comparing the two (`crossCheckRegressions`).
  */
-export const reviewFindings = (report: MutationReport): Review => {
+export const reviewFindings = (
+  report: MutationReport,
+  base?: MutationReport,
+): Review => {
   if (report.comparison === "unavailable") {
     return { lines: [formatAnnotation(unmeasured)], exitCode: 1 };
   }
-  const regressed = report.findings.filter(
+  const reported = report.findings.filter(
     (finding) => finding.kind === "detectionRegression",
   );
+  const reportedKeys = new Set(reported.map((finding) => finding.key));
+  const regressed = [
+    ...reported,
+    ...(base === undefined ? [] : crossCheckRegressions(base, report)).filter(
+      (finding) => !reportedKeys.has(finding.key),
+    ),
+  ];
   const regressedKeys = new Set(regressed.map((finding) => finding.key));
   const regressions = regressed.map((finding) => regression(report, finding));
   const idle = report.findings
