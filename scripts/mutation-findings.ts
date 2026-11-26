@@ -25,7 +25,6 @@ export interface MutantRecord {
   /** `Killed`, `Survived`, `NoCoverage`, `Timeout`, `Pending`, ... */
   readonly status?: string;
   readonly killedBy: readonly string[];
-  readonly coveredBy: readonly string[];
 }
 
 /** One entry of the report's `findings`. */
@@ -43,8 +42,8 @@ export interface MutationReport {
   readonly findings: readonly MutationFinding[];
   /** Mutants per source file, keyed by the path relative to the root. */
   readonly files: ReadonlyMap<string, readonly MutantRecord[]>;
-  /** The source of each file when the report was written. */
-  readonly sources: ReadonlyMap<string, string>;
+  /** Changed test files the runner does not collect (`warnings`). */
+  readonly uncollected: readonly string[];
   /** Test ids changed and removed since the baseline (`testChanges`). */
   readonly changedTests: readonly string[];
   readonly removedTests: readonly string[];
@@ -86,10 +85,10 @@ type ReportField =
   | "key"
   | "test"
   | "previousKillers"
-  | "source"
   | "status"
   | "killedBy"
-  | "coveredBy"
+  | "warnings"
+  | "file"
   | "testChanges"
   | "changed"
   | "removed";
@@ -137,7 +136,6 @@ const decodeMutant = (value: unknown): readonly MutantRecord[] => {
       ...stringField(value, "status"),
       ...decodeLocation(value.location),
       killedBy: strings(value.killedBy),
-      coveredBy: strings(value.coveredBy),
     },
   ];
 };
@@ -156,14 +154,16 @@ const decodeFinding = (value: unknown): readonly MutationFinding[] => {
   ];
 };
 
-const decodeSources = (value: JsonObject): ReadonlyMap<string, string> =>
-  new Map(
-    Object.entries(value).flatMap(([file, entry]) =>
-      isObject(entry) && typeof entry.source === "string"
-        ? [[file, entry.source] as const]
-        : [],
-    ),
-  );
+const decodeUncollected = (value: unknown): readonly string[] =>
+  Array.isArray(value)
+    ? value.flatMap((warning) =>
+        isObject(warning) &&
+        warning.kind === "uncollectedTest" &&
+        typeof warning.file === "string"
+          ? [warning.file]
+          : [],
+      )
+    : [];
 
 const decodeTestChanges = (
   value: unknown,
@@ -221,7 +221,7 @@ export const decodeReport = (value: unknown): DecodedReport => {
       comparison,
       findings: findings.flatMap(decodeFinding),
       files: decodeFiles(files),
-      sources: decodeSources(files),
+      uncollected: decodeUncollected(value.warnings),
       ...decodeTestChanges(value.testChanges),
     },
   };
@@ -352,101 +352,110 @@ const isMutationSetting = (file: string): boolean =>
 const isVitestConfig = (file: string): boolean =>
   file.startsWith("vitest.config.") && !file.includes("/");
 
+/** The review itself and what runs it: editing them can switch it off. */
+const isJudge = (file: string): boolean =>
+  file === "package.json" ||
+  file === "lefthook.yml" ||
+  file === "scripts/check-mutation-findings.ts" ||
+  /^scripts\/mutation-[^/]+(?<!\.test)\.(?:ts|sh)$/u.test(file) ||
+  /^\.github\/workflows\/[^/]+$/u.test(file);
+
+const settingChange = (
+  file: string,
+  setup: ReadonlySet<string>,
+): Annotation | undefined => {
+  if (isMutationSetting(file)) {
+    return {
+      level: "warning",
+      title: "ミューテーションテストの設定が変わった",
+      file,
+      message: `${file}が変わりました。検査する範囲が狭まっていないか、動作の変わるミュータントを記録していないかを確かめてください。`,
+    };
+  }
+  if (isVitestConfig(file) || setup.has(file)) {
+    return {
+      level: "warning",
+      title: "テストの設定や準備ファイルが変わった",
+      file,
+      message: `${file}が変わりました。テストの設定や準備ファイルは、アサーションを無力化するなど、ミューテーションテストでは見つからない形でテストを弱められます。人が確かめてください。`,
+    };
+  }
+  if (isJudge(file)) {
+    return {
+      level: "warning",
+      title: "テストを弱めた変更の判定が変わった",
+      file,
+      message: `${file}が変わりました。判定のスクリプトや、それを動かす設定を書き換えると、テストを弱めた変更を通せます。人が確かめてください。`,
+    };
+  }
+  return undefined;
+};
+
 /**
  * Warn about changed files that decide what mutation testing checks.
  *
  * Editing mutator's settings can narrow the check or record a mutant that
  * changes behaviour as equivalent. Editing the Vitest config or a setup file
  * (`testSetupFiles`, the resolved `setupFiles` / `globalSetup`) can make
- * every assertion pass. No test fails because of either, so a person has to
- * look.
+ * every assertion pass. Editing the review or what runs it can switch it
+ * off. No test fails because of any of them, so a person has to look.
  */
 export const reviewSettingChanges = (
   changedFiles: readonly string[],
   testSetupFiles: readonly string[] = [],
 ): readonly string[] => {
   const setup = new Set(testSetupFiles);
-  return changedFiles.flatMap((file) => {
-    if (isMutationSetting(file)) {
-      return [
-        formatAnnotation({
-          level: "warning",
-          title: "ミューテーションテストの設定が変わった",
-          file,
-          message: `${file}が変わりました。検査する範囲が狭まっていないか、動作の変わるミュータントを記録していないかを確かめてください。`,
-        }),
-      ];
-    }
-    if (isVitestConfig(file) || setup.has(file)) {
-      return [
-        formatAnnotation({
-          level: "warning",
-          title: "テストの設定や準備ファイルが変わった",
-          file,
-          message: `${file}が変わりました。テストの設定や準備ファイルは、アサーションを無力化するなど、ミューテーションテストでは見つからない形でテストを弱められます。人が確かめてください。`,
-        }),
-      ];
-    }
-    return [];
+  return [...new Set(changedFiles)].flatMap((file) => {
+    const annotation = settingChange(file, setup);
+    return annotation === undefined ? [] : [formatAnnotation(annotation)];
   });
 };
 
-/** Statuses that count as undetected now. */
+/**
+ * The lines of mutator's text reporter about a test the change skips
+ * (`it.skip` and the like). The JSON report does not carry them
+ * (`skippedMessage` in node_modules/@mizchi/mutator/src/report.ts).
+ */
+const SKIPPED =
+  /^warning: (?<file>.+?):(?<line>\d+) skips a test in the change, so it checks nothing: (?<text>.*)$/gmu;
+
+/** Warnings for the tests the change skips, from mutator's text output. */
+export const reviewSkippedTests = (output: string): readonly string[] =>
+  [...output.matchAll(SKIPPED)].map((match) =>
+    formatAnnotation({
+      level: "warning",
+      title: "飛ばしたテスト",
+      file: match.groups?.["file"] ?? "",
+      line: Number(match.groups?.["line"]),
+      message: `変更の中でテストを飛ばしています（${match.groups?.["text"] ?? ""}）。飛ばしたテストは何も確かめません。`,
+    }),
+  );
+
+/**
+ * A line of mutator's text reporter that says mutants of the diff were left
+ * unrun (`--time-budget`, `--mutants-per-line`), or a status count with
+ * `Pending` for the diff. Settings like these can empty the review.
+ */
+const NOT_RUN = /^not run: .*$|^(?:\w+ \d+ · )*Pending \d+(?: · .*)?$/mu;
+
+/** An error when mutants of the diff were left unrun. */
+export const reviewNotRun = (output: string): readonly string[] => {
+  const match = NOT_RUN.exec(output);
+  return match === null
+    ? []
+    : [
+        formatAnnotation({
+          level: "error",
+          title: "変更の範囲のミュータントが実行されなかった",
+          message: `mutatorが変更の範囲のミュータントを実行せずに残しました（${match[0]}）。mutator.config.*のtimeBudgetやmutantsPerLineなど、実行を減らす設定を確かめてください。実行されないミュータントでは、テストが弱くなったかを確かめられません。`,
+        }),
+      ];
+};
+
+/** Statuses that count as undetected. */
 const UNDETECTED = new Set(["Survived", "NoCoverage"]);
-
-/**
- * Whether a mutant the baseline recorded as `Timeout` lost its detection.
- *
- * A `Timeout` carries no killing or covering tests, and a busy machine can
- * time out a mutant no test detects. So it counts only when the change can
- * explain the loss: no test reaches the mutant any more (a mutant no test
- * reaches is never run, so it cannot have timed out before), a test that
- * covers it changed, or the change removed tests.
- */
-const lostTimeout = (current: MutationReport, mutant: MutantRecord): boolean =>
-  mutant.status === "NoCoverage" ||
-  current.removedTests.length > 0 ||
-  mutant.coveredBy.some((test) => current.changedTests.includes(test));
-
-/**
- * Detection regressions found by comparing the baseline's report with the
- * current one, for mutants of files whose source did not change.
- *
- * mutator reports a regression only when the baseline verdict was `Killed`.
- * On a busy machine the baseline can record `Timeout` for a mutant a test
- * detects, and the regression then goes unreported. An unchanged source means
- * every function in the file is unchanged, which mutator requires too.
- */
-export const crossCheckRegressions = (
-  base: MutationReport,
-  current: MutationReport,
-): readonly MutationFinding[] =>
-  [...current.files].flatMap(([file, mutants]) => {
-    const source = current.sources.get(file);
-    if (source === undefined || base.sources.get(file) !== source) {
-      return [];
-    }
-    const before = new Map(
-      (base.files.get(file) ?? []).map((mutant) => [mutant.id, mutant]),
-    );
-    return mutants.flatMap((mutant) => {
-      const old = before.get(mutant.id);
-      const lost =
-        old !== undefined &&
-        UNDETECTED.has(mutant.status ?? "") &&
-        (old.status === "Killed" ||
-          (old.status === "Timeout" && lostTimeout(current, mutant)));
-      return lost
-        ? [
-            {
-              kind: "detectionRegression",
-              key: mutant.id,
-              previousKillers: old.killedBy,
-            },
-          ]
-        : [];
-    });
-  });
+/** Statuses that count as detected. */
+const DETECTED = new Set(["Killed", "Timeout"]);
 
 /**
  * The scope hash of each mutant in a mutator snapshot (format 2: rows of
@@ -476,108 +485,107 @@ export const scopeHashes = (snapshot: unknown): ReadonlyMap<string, string> => {
   );
 };
 
-/** How many times a recheck runs each mutant. */
-export const RECHECKS = 2;
+const mutantsById = (
+  report: MutationReport,
+): ReadonlyMap<string, MutantRecord> =>
+  new Map(
+    [...report.files.values()].flat().map((mutant) => [mutant.id, mutant]),
+  );
 
 /**
- * Mutants to run again without the previous results.
+ * Mutants the run left out although a changed test detected them.
  *
- * mutator keeps a previous `Killed` verdict while any of the tests that
- * killed the mutant is unchanged. On a busy machine an unrelated test can
- * fail by chance while a mutant runs and is then recorded as one of its
- * killers. If the change weakens the test that really detected the mutant,
- * the unrelated, unchanged killer keeps the old verdict, and mutator reports
- * no regression. So a mutant is run again when the baseline killed it with
- * both changed or removed tests and unchanged ones, its function is
- * unchanged, it still counts as detected, and mutator did not already report
- * it. Mutants whose killers all changed are run again by mutator itself.
+ * `--since --include-test-changes` selects the mutants that changed tests
+ * cover. A mutant no test covers in the coverage run (one at module level,
+ * such as a regular expression built when the module loads) is never
+ * selected, so weakening the test that detected it at the base goes
+ * unnoticed. These are the mutants the baseline killed with a changed or
+ * removed test, whose function is unchanged, and which this run did not
+ * decide (`Pending`, or missing from the report).
  */
-export const recheckCandidates = (
+export const unselectedCandidates = (
   base: MutationReport,
   current: MutationReport,
   baseScopes: ReadonlyMap<string, string>,
   currentScopes: ReadonlyMap<string, string>,
 ): readonly string[] => {
   const touched = new Set([...current.changedTests, ...current.removedTests]);
-  const reported = new Set(
-    current.findings
-      .filter((finding) => finding.kind === "detectionRegression")
-      .map((finding) => finding.key),
-  );
-  const before = new Map(
-    [...base.files.values()].flat().map((mutant) => [mutant.id, mutant]),
-  );
-  return [...current.files.values()]
-    .flat()
+  const now = mutantsById(current);
+  return [...mutantsById(base).values()]
     .filter((mutant) => {
-      const old = before.get(mutant.id);
       const scope = baseScopes.get(mutant.id);
+      const status = now.get(mutant.id)?.status;
       return (
-        old !== undefined &&
-        old.status === "Killed" &&
-        old.killedBy.some((test) => touched.has(test)) &&
-        old.killedBy.some((test) => !touched.has(test)) &&
-        (mutant.status === "Killed" || mutant.status === "Timeout") &&
-        !reported.has(mutant.id) &&
+        mutant.status === "Killed" &&
+        mutant.killedBy.some((test) => touched.has(test)) &&
         scope !== undefined &&
-        scope === currentScopes.get(mutant.id)
+        scope === currentScopes.get(mutant.id) &&
+        (status === undefined || status === "Pending")
       );
     })
     .map((mutant) => mutant.id)
     .sort();
 };
 
-/** An error for each rechecked mutant that one of the reruns did not detect. */
-export const reviewRechecked = (
-  current: MutationReport,
+/**
+ * Errors for the mutants `unselectedCandidates` picked, from the report of
+ * running them with `--only`: one per mutant no test detects now, and one
+ * per mutant whose status is neither detected nor undetected.
+ */
+export const reviewUnselected = (
+  base: MutationReport,
   keys: readonly string[],
-  reruns: readonly MutationReport[],
+  rerun: MutationReport,
 ): readonly string[] => {
-  const statuses = reruns.map(
-    (rerun) =>
-      new Map(
-        [...rerun.files.values()].flat().map((mutant) => [mutant.id, mutant]),
+  const now = mutantsById(rerun);
+  return keys.flatMap((key) => {
+    const status = now.get(key)?.status;
+    if (DETECTED.has(status ?? "")) {
+      return [];
+    }
+    const { change, place } = placeMutant(base, key);
+    return [
+      formatAnnotation(
+        UNDETECTED.has(status ?? "")
+          ? {
+              level: "error",
+              title: "テストが弱くなった",
+              message: `変わっていないコードのミュータント${key}${change}を、基準では変えたか消したテストが検出していましたが、今はどのテストも検出しません（範囲に選ばれなかったため、個別に実行して確かめました）。${REGRESSION_ADVICE}`,
+              ...place,
+            }
+          : {
+              level: "error",
+              title: "ミュータントの結果が想定と違う",
+              message: `変わっていないコードのミュータント${key}${change}を個別に実行しましたが、結果が${status ?? "ありません"}でした。検出したかどうかが分からないため、失敗にします。`,
+              ...place,
+            },
       ),
-  );
-  return keys
-    .filter((key) =>
-      statuses.some((status) => UNDETECTED.has(status.get(key)?.status ?? "")),
-    )
-    .map((key) => {
-      const { change, place } = placeMutant(current, key);
-      return formatAnnotation({
-        level: "error",
-        title: "テストが弱くなった",
-        message: `変わっていないコードのミュータント${key}${change}を、前の結果を使わずに実行し直すと、どのテストも検出しません。基準では変えたテストと変わっていないテストの両方が検出したと記録されていたため、mutatorは前の結果を使っていました。${REGRESSION_ADVICE}`,
-        ...place,
-      });
-    });
+    ];
+  });
 };
+
+/** Warnings for the test files mutator says the runner does not collect. */
+const uncollected = (report: MutationReport): readonly Annotation[] =>
+  report.uncollected.map((file) => ({
+    level: "warning",
+    title: "拾われないテストファイル",
+    file,
+    message: `${file}は変わりましたが、テストランナーが集めません。このファイルのテストは何も検出しません。vitest.config.*のinclude / excludeなどを確かめてください。`,
+  }));
 
 /**
  * Review the findings of a report.
  *
  * Fails when the report has a detection regression, or when mutator had no
- * baseline to compare with. With the baseline's own report, regressions are
- * also found by comparing the two (`crossCheckRegressions`).
+ * baseline to compare with.
  */
-export const reviewFindings = (
-  report: MutationReport,
-  base?: MutationReport,
-): Review => {
+export const reviewFindings = (report: MutationReport): Review => {
   if (report.comparison === "unavailable") {
     return { lines: [formatAnnotation(unmeasured)], exitCode: 1 };
   }
-  const reported = report.findings.filter(
+  const regressed = report.findings.filter(
     (finding) => finding.kind === "detectionRegression",
   );
-  const reportedKeys = new Set(reported.map((finding) => finding.key));
-  const regressed = [
-    ...reported,
-    ...(base === undefined ? [] : crossCheckRegressions(base, report)).filter(
-      (finding) => !reportedKeys.has(finding.key),
-    ),
-  ];
   const regressedKeys = new Set(regressed.map((finding) => finding.key));
   const regressions = regressed.map((finding) => regression(report, finding));
   const idle = report.findings
@@ -592,7 +600,9 @@ export const reviewFindings = (
     .map((finding) => gap(report, finding));
   return {
     lines: [
-      ...[...regressions, ...idle, ...gaps].map(formatAnnotation),
+      ...[...regressions, ...idle, ...gaps, ...uncollected(report)].map(
+        formatAnnotation,
+      ),
       `テストが弱くなった箇所: ${regressions.length}件、何も検出しない新しいテスト: ${idle.length}件、テストが検出できないミュータント: ${gaps.length}件`,
     ],
     exitCode: regressions.length === 0 ? 0 : 1,

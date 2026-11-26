@@ -195,19 +195,22 @@ jobs:
         run: pnpm exec wxt prepare
       # scripts/mutation-diff.sh runs every mutant at the merge base with the
       # base branch, with this checkout's dependencies, as the baseline. Then
-      # it runs the mutants on changed lines and those changed tests cover,
-      # and fails when a test detected a mutant of unchanged code at the base
-      # and no test detects it now: the change weakened or removed a test.
-      # Undetected mutants, a new test that detects nothing (--kill-matrix)
-      # and a changed mutator.config.* / mutator.accepted.json are warnings.
-      # Same script as `pnpm mutation:diff` in `pnpm check` and pre-push.
+      # it runs the mutants on changed lines and those changed tests cover
+      # (always with --kill-matrix), and the mutants changed tests killed at
+      # the base that the diff did not select. It fails when a test detected
+      # a mutant of unchanged code at the base and no test detects it now:
+      # the change weakened or removed a test. Changes to the files that
+      # decide what it checks are warnings. Same script as
+      # `pnpm mutation:diff` in `pnpm check` and pre-push.
       - name: Tests weakened by the change
         if: github.event_name == 'pull_request'
-        run: bash scripts/mutation-diff.sh --kill-matrix "origin/${GITHUB_BASE_REF}"
-      # On a copy of this checkout in a temporary repository, a branch with no
-      # change must pass and one that deletes a test must fail. A mutator
-      # update (e.g. from Dependabot) that quietly breaks the review fails
-      # here. It runs on every event, like the step below.
+        run: bash scripts/mutation-diff.sh "origin/${GITHUB_BASE_REF}"
+      # On a copy of this checkout in a temporary repository with a sample of
+      # its own, a branch with no change must pass, and deleting or weakening
+      # the sample's test must fail. A mutator update (e.g. from Dependabot)
+      # that quietly breaks the review fails here. Like the step below, it
+      # runs on every event once the dependencies and WXT are prepared, even
+      # when the step above failed.
       - name: Mutation guard
         if: ${{ !cancelled() && steps.prepare.conclusion == 'success' }}
         run: pnpm test:mutation-guard

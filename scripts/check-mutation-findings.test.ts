@@ -110,53 +110,58 @@ describe("run", () => {
     const { output, exitCode } = run(["origin/missing"], root);
     expect(exitCode).toBe(1);
     expect(output).toMatch(
-      /^::error title=基準のrefと比べられない::origin\/missing\.\.\.HEADの差分を取れません。/,
+      /^::error title=基準のrefと比べられない::origin\/missingとの差分を取れません。/,
     );
     expect(output).toContain("origin/missing");
     expect(output.trimEnd().split("\n")).toHaveLength(1);
   });
 
-  it("fails on a regression found only by comparing with the baseline's report", () => {
-    const mutant = (status: string) => ({
-      id: "m",
-      mutatorName: "BooleanLiteral",
-      replacement: "true",
-      location: { start: { line: 2, column: 1 } },
-      status,
-      killedBy: [],
-      coveredBy: [],
-    });
-    const reportWith = (status: string) => ({
-      schemaVersion: "2",
-      comparison: "available",
-      findings: [],
-      files: { "src/core/a.ts": { source: "code", mutants: [mutant(status)] } },
-    });
-    writeReport(reportWith("NoCoverage"));
-    write("base.json", JSON.stringify(reportWith("Timeout")));
-    const { output, exitCode } = run(
-      ["--base-report", join(root, "base.json")],
-      root,
-    );
-    expect(exitCode).toBe(1);
-    expect(output).toMatch(
-      /^::error file=src\/core\/a\.ts,line=2,title=テストが弱くなった::/,
-    );
-  });
-
-  it("exits 1 when the baseline's report cannot be read", () => {
+  it("reads skipped tests and unrun mutants from mutator's output", () => {
     writeReport({
       schemaVersion: "2",
       comparison: "available",
       findings: [],
       files: {},
     });
+    write(
+      "mutator.txt",
+      "warning: src/a.test.ts:3 skips a test in the change, so it checks nothing: a skipped test\nKilled 2 · Pending 1\n",
+    );
     const { output, exitCode } = run(
-      ["--base-report", join(root, "missing.json")],
+      ["--mutator-output", join(root, "mutator.txt")],
       root,
     );
     expect(exitCode).toBe(1);
-    expect(output).toContain("基準のレポート");
+    expect(output).toMatch(
+      /^::warning file=src\/a\.test\.ts,line=3,title=飛ばしたテスト::/,
+    );
+    expect(output).toContain(
+      "title=変更の範囲のミュータントが実行されなかった",
+    );
+  });
+
+  it("warns about uncommitted and untracked setting changes", () => {
+    writeReport({
+      schemaVersion: "2",
+      comparison: "available",
+      findings: [],
+      files: {},
+    });
+    write("mutator.config.json", "{}\n");
+    write(".gitignore", ".mutator/\n");
+    git("init", "--quiet", "--initial-branch=main");
+    git("add", "mutator.config.json", ".gitignore");
+    git("commit", "--quiet", "-m", "base");
+    write("mutator.config.json", '{"include":[]}\n');
+    write("vitest.config.ts", "export default {};\n");
+    const { output, exitCode } = run(["main"], root);
+    expect(exitCode).toBe(0);
+    expect(output).toContain(
+      "::warning file=mutator.config.json,title=ミューテーションテストの設定が変わった::",
+    );
+    expect(output).toContain(
+      "::warning file=vitest.config.ts,title=テストの設定や準備ファイルが変わった::",
+    );
   });
 
   it("warns about mutator settings changed since the base ref", () => {

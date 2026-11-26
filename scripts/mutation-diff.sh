@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Fail when a change weakened the tests, judged by mutation testing.
 #
-# Usage: scripts/mutation-diff.sh [--kill-matrix] [--skip-without-base] <base-ref>
+# Usage: scripts/mutation-diff.sh [--skip-without-base] <base-ref>
 #
 # The baseline is made fresh on every run instead of reusing the last run's
 # .mutator, which may come from another branch or another environment:
@@ -22,35 +22,37 @@
 #    still exists (under its new name after a rename) but the current
 #    settings leave it out: narrowing include / exclude drops it from the
 #    baseline and the change alike, so nothing would look weaker.
-# 5. Replace this checkout's .mutator with the baseline's snapshots, run the
-#    mutants of the diff and of the changed tests, and review the report with
-#    scripts/check-mutation-findings.ts. Besides mutator's own regressions, it
-#    compares the baseline's report with the current one: mutator counts only
-#    a `Killed` baseline verdict, and a busy machine can turn one into
-#    `Timeout`. Then scripts/mutation-recheck.ts runs again, without the
-#    previous results, the mutants whose baseline killers mix changed and
-#    unchanged tests (an unrelated test that failed by chance keeps mutator's
-#    previous verdict).
+# 5. Replace this checkout's .mutator with the baseline's snapshots, run
+#    `mutator --since <merge-base> --include-test-changes --kill-matrix` and
+#    review the report with scripts/check-mutation-findings.ts.
+#    --kill-matrix is always on: besides reporting new tests that detect
+#    nothing, it keeps mutator from reusing a baseline Killed for a mutant of
+#    the diff (mutator-core's plan.ts reuses a kill under --kill-matrix only
+#    when it was measured with a full matrix), so a test that failed by
+#    chance in the baseline cannot hide a weakened test.
+# 6. scripts/mutation-unselected.ts runs, with --only, the mutants a changed
+#    or removed test killed at the base but the diff did not select (a mutant
+#    at module level is covered by no test, so --include-test-changes misses
+#    it).
 #
 # Exit codes: 0 when the tests kept their strength. 1 when the tests got
-# weaker or left out, when no baseline could be made (e.g. the base's tests fail with this
-# checkout's dependencies), when mutator could not use the baseline it was
-# given, or when the run itself failed. A missing baseline fails because
-# letting it pass would let a change that breaks the base's tests (a new
-# setup file, say) remove tests unnoticed; a dependency update that breaks
-# the tests fails the ordinary test job as well.
+# weaker or left out, when mutants of the diff were not run, when no baseline
+# could be made (e.g. the base's tests fail with this checkout's
+# dependencies), when mutator could not use the baseline it was given, when
+# .mutator is tracked by git, when another run holds the lock, or when the
+# run itself failed. A missing baseline fails because letting it pass would
+# let a change that breaks the base's tests (a new setup file, say) remove
+# tests unnoticed; a dependency update that breaks the tests fails the
+# ordinary test job as well.
 #
-# --kill-matrix also runs every covering test per mutant, which reports new
-# tests that detect nothing. --skip-without-base exits 0 when <base-ref> does
-# not exist (a clone without origin/main) or there is no git repository.
+# --skip-without-base exits 0 when <base-ref> does not exist (a clone without
+# origin/main) or there is no git repository.
 set -euo pipefail
 
-kill_matrix=()
 skip_without_base=false
 base=""
 for arg in "$@"; do
   case "$arg" in
-    --kill-matrix) kill_matrix=(--kill-matrix) ;;
     --skip-without-base) skip_without_base=true ;;
     -*)
       echo "unknown option: $arg" >&2
@@ -60,7 +62,7 @@ for arg in "$@"; do
   esac
 done
 if [ -z "$base" ]; then
-  echo "usage: $0 [--kill-matrix] [--skip-without-base] <base-ref>" >&2
+  echo "usage: $0 [--skip-without-base] <base-ref>" >&2
   exit 2
 fi
 
@@ -87,13 +89,37 @@ if ! merge_base=$(git merge-base "$base" HEAD); then
   exit 1
 fi
 
+# A tracked .mutator would let a commit bring its own snapshots and reports.
+if [ -n "$(git ls-files -- .mutator | head -n 1)" ]; then
+  echo "::error title=.mutatorがgitで追跡されている::.mutatorはmutatorの結果の置き場で、毎回作り直します。git rm -r --cached .mutatorで追跡を外してください。"
+  exit 1
+fi
+
+# Two runs in one checkout would fight over .mutator. The lock holds the PID
+# of the run; a lock whose process is gone was left by a killed run.
+lock=$(git rev-parse --path-format=absolute --git-path mutation-diff.lock)
+take_lock() { (set -o noclobber && echo "$$" >"$lock") 2>/dev/null; }
+if ! take_lock; then
+  holder=$(cat "$lock" 2>/dev/null || true)
+  if [ -n "$holder" ] && kill -0 "$holder" 2>/dev/null; then
+    echo "::error title=mutation:diffが動いている::同じ作業ツリーで、別のmutation:diff（プロセス${holder}）が動いています。終わってから実行してください。"
+    exit 1
+  fi
+  rm -f "$lock"
+  if ! take_lock; then
+    echo "::error title=mutation:diffのロックを取れない::${lock}を作れません。"
+    exit 1
+  fi
+fi
+
 work=$(mktemp -d "${TMPDIR:-/tmp}/mutation-base.XXXXXX")
 tree="$work/tree"
-# Remove the worktree however the script ends. Its node_modules is untracked,
-# hence --force.
+# Remove the worktree and the lock however the script ends. The worktree's
+# node_modules is untracked, hence --force.
 trap 'git -C "$root" worktree remove --force "$tree" >/dev/null 2>&1 || true
 rm -rf "$work"
-git -C "$root" worktree prune' EXIT
+git -C "$root" worktree prune
+rm -f "$lock"' EXIT
 trap 'exit 130' INT TERM
 
 # Escape a value for the message of a workflow command.
@@ -172,7 +198,7 @@ if ! (cd "$tree" && GITHUB_ACTIONS='' pnpm exec mutator --reporter json) >>"$wor
   no_baseline "全件のミューテーションテストが失敗しました（今の依存でベースのテストが落ちる、など）"
 fi
 echo "mutation:diff: baseline made in $(($(date +%s) - started))s"
-# The baseline's own report, for the cross-check in check-mutation-findings.ts.
+# The baseline's report and snapshot, for scripts/mutation-unselected.ts.
 if ! cp "$tree/.mutator/report/mutation.json" "$work/base-report.json" ||
   ! cp "$tree/.mutator/snapshot.json" "$work/base-snapshot.json"; then
   no_baseline "基準のレポートかsnapshot（.mutator/report/mutation.json、.mutator/snapshot.json）がありません"
@@ -190,10 +216,15 @@ for file in "$work"/base-config/vitest.config.*; do
   cp "$file" "$base_vitest"
   break
 done
-for file in "$work"/base-config/mutator.config.*; do
-  base_mutator="$tree/.mutation-base-mutator.${file##*/mutator.}"
-  cp "$file" "$base_mutator"
-  break
+# mutator reads the first of these (CONFIG_FILES in
+# node_modules/@mizchi/mutator/src/config.ts).
+for name in mutator.config.ts mutator.config.mts mutator.config.mjs \
+  mutator.config.js mutator.config.json; do
+  if [ -f "$work/base-config/$name" ]; then
+    base_mutator="$tree/.mutation-base-mutator.${name#mutator.}"
+    cp "$work/base-config/$name" "$base_mutator"
+    break
+  fi
 done
 if [ "$base_vitest" = none ]; then
   for file in "$tree"/vite.config.*; do base_vitest=$file; break; done
@@ -213,7 +244,8 @@ mkdir -p .mutator/scopes
 for snapshot in "$tree"/.mutator/scopes/*.json; do cp "$snapshot" .mutator/scopes/; done
 if [ -f "$tree/.mutator/snapshot.json" ]; then cp "$tree/.mutator/snapshot.json" .mutator/; fi
 
-if ! GITHUB_ACTIONS='' pnpm exec mutator --since "$merge_base" --include-test-changes "${kill_matrix[@]}"; then
+if ! GITHUB_ACTIONS='' pnpm exec mutator --since "$merge_base" --include-test-changes \
+  --kill-matrix 2>&1 | tee "$work/diff.log"; then
   echo "::error title=ミューテーションテストが失敗した::mutator --since ${merge_base}が失敗しました。上の出力を確かめてください。"
   exit 1
 fi
@@ -222,12 +254,9 @@ for file in "${vitest_files[@]}"; do watch_args+=(--watch "$file"); done
 status=0
 node --experimental-strip-types --disable-warning=ExperimentalWarning \
   scripts/check-mutation-findings.ts "$merge_base" "${watch_args[@]}" \
-  --base-report "$work/base-report.json" || status=$?
-# mutator keeps a baseline Killed while any of its killers is unchanged, so an
-# unrelated test that failed by chance in the baseline can hide a weakened
-# test. Those mutants run again without the previous results.
+  --mutator-output "$work/diff.log" || status=$?
 node --experimental-strip-types --disable-warning=ExperimentalWarning \
-  scripts/mutation-recheck.ts "$work" || status=1
+  scripts/mutation-unselected.ts "$work" || status=1
 echo "mutation:diff: done in $(($(date +%s) - started))s"
 if [ "$scope_status" -ne 0 ]; then exit 1; fi
 exit "$status"

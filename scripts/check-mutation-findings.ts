@@ -5,20 +5,22 @@
  * Usage:
  *   node --experimental-strip-types --disable-warning=ExperimentalWarning \
  *     scripts/check-mutation-findings.ts [base-ref] [--watch <file>]... \
- *     [--base-report <mutation.json>]
+ *     [--mutator-output <file>]
  *
  * Reads `.mutator/report/mutation.json` from the last mutator run and prints
  * GitHub Actions annotations: an error for each mutant the tests detected
  * before and no longer detect, a warning for each new test that detects
- * nothing and for each mutant no test detects. With a base ref (e.g.
- * `origin/main`) it also warns about changed `mutator.config.*` /
- * `mutator.accepted.json`, `vitest.config.*` and each `--watch` file (the
- * Vitest setup files) since that ref. `--base-report` is the baseline run's
- * report: a mutant of an unchanged file that the baseline detected (`Killed`
- * or `Timeout`) and nothing detects now is a regression even when mutator
- * does not report it. Exits 1 when the tests got weaker, when mutator had no
- * baseline to compare with, or when a report or the ref cannot be read.
- * `scripts/mutation-diff.sh` makes the baseline and runs this.
+ * nothing, each mutant no test detects and each changed test file the runner
+ * does not collect. With a base ref (e.g. `origin/main`) it also warns about
+ * the files changed since the merge base, committed or not, that decide what
+ * the review checks: mutator's and Vitest's settings, each `--watch` file
+ * (the Vitest setup files), the review scripts, package.json, lefthook.yml
+ * and the workflows. `--mutator-output` is the text mutator printed: a test
+ * the change skips is a warning, and mutants of the diff left unrun are an
+ * error. Exits 1 when the tests got weaker, when mutator had no baseline to
+ * compare with, when mutants of the diff were not run, or when the report or
+ * the ref cannot be read. `scripts/mutation-diff.sh` makes the baseline and
+ * runs this.
  */
 
 import { execFileSync } from "node:child_process";
@@ -31,7 +33,9 @@ import {
   type MutationReport,
   type Review,
   reviewFindings,
+  reviewNotRun,
   reviewSettingChanges,
+  reviewSkippedTests,
 } from "./mutation-findings.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -89,30 +93,30 @@ const loadReport = (
     : decoded;
 };
 
-const reviewReport = (root: string, basePath: string | undefined): Review => {
+const reviewReport = (root: string): Review => {
   const current = loadReport(join(root, REPORT_PATH), REPORT_PATH);
-  if ("review" in current) {
-    return current.review;
-  }
-  if (basePath === undefined) {
-    return reviewFindings(current.report);
-  }
-  const base = loadReport(basePath, `基準のレポート${basePath}`);
-  return "review" in base
-    ? base.review
-    : reviewFindings(current.report, base.report);
+  return "review" in current ? current.review : reviewFindings(current.report);
 };
+
+const git = (root: string, args: readonly string[]): string =>
+  execFileSync("git", args, {
+    cwd: root,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
 
 const changedFiles = (
   root: string,
   base: string,
 ): { readonly files: readonly string[] } | { readonly problem: string } => {
   try {
-    const output = execFileSync(
-      "git",
-      ["diff", "--name-only", `${base}...HEAD`],
-      { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
-    );
+    // Uncommitted and untracked files count too, as they do for mutator's
+    // --since.
+    const mergeBase = git(root, ["merge-base", base, "HEAD"]).trim();
+    const output = [
+      git(root, ["diff", "--name-only", mergeBase]),
+      git(root, ["ls-files", "--others", "--exclude-standard"]),
+    ].join("\n");
     return { files: output.split("\n").filter((file) => file.length > 0) };
   } catch (error) {
     const stderr =
@@ -126,11 +130,11 @@ export const run = (
   args: readonly string[],
   root: string = REPO_ROOT,
 ): { output: string; exitCode: number } => {
-  const valued = new Set(["--watch", "--base-report"]);
+  const valued = new Set(["--watch", "--mutator-output"]);
   const values = (name: string): readonly string[] =>
     args.flatMap((arg, index) => (args[index - 1] === name ? [arg] : []));
   const watched = values("--watch");
-  const basePath = values("--base-report")[0];
+  const outputPath = values("--mutator-output")[0];
   const base = args.find(
     (arg, index) => !arg.startsWith("--") && !valued.has(args[index - 1] ?? ""),
   );
@@ -139,14 +143,17 @@ export const run = (
     "problem" in changed
       ? failure(
           "基準のrefと比べられない",
-          `${base}...HEADの差分を取れません。refの名前と、履歴を取得しているか（CIではfetch-depth: 0）を確かめてください: ${changed.problem}`,
+          `${base}との差分を取れません。refの名前と、履歴を取得しているか（CIではfetch-depth: 0）を確かめてください: ${changed.problem}`,
         )
-      : reviewReport(root, basePath);
+      : reviewReport(root);
   const settings =
     "problem" in changed ? [] : reviewSettingChanges(changed.files, watched);
+  const mutatorOutput =
+    outputPath === undefined ? "" : readFileSync(outputPath, "utf8");
+  const notRun = reviewNotRun(mutatorOutput);
   return {
-    output: `${[...settings, ...review.lines].join("\n")}\n`,
-    exitCode: review.exitCode,
+    output: `${[...settings, ...reviewSkippedTests(mutatorOutput), ...notRun, ...review.lines].join("\n")}\n`,
+    exitCode: notRun.length > 0 ? 1 : review.exitCode,
   };
 };
 

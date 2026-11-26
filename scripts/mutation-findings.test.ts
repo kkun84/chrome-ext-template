@@ -1,15 +1,16 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
-  crossCheckRegressions,
   decodeReport,
   formatAnnotation,
   type MutationReport,
-  recheckCandidates,
   reviewFindings,
-  reviewRechecked,
+  reviewNotRun,
   reviewSettingChanges,
+  reviewSkippedTests,
+  reviewUnselected,
   scopeHashes,
+  unselectedCandidates,
 } from "./mutation-findings.ts";
 
 const REGRESSION_ADVICE =
@@ -151,6 +152,27 @@ describe("reviewFindings", () => {
     });
   });
 
+  it("warns about a changed test file the runner does not collect", () => {
+    expect(
+      reviewFindings(
+        report({
+          ...base,
+          findings: [],
+          warnings: [
+            {
+              kind: "uncollectedTest",
+              file: "src/core/a.test.mts",
+              message: "m",
+            },
+            { kind: "childProcessTest", test: "t", command: "c" },
+          ],
+        }),
+      ).lines[0],
+    ).toMatch(
+      /^::warning file=src\/core\/a\.test\.mts,title=拾われないテストファイル::/,
+    );
+  });
+
   it("fails when there was no baseline to compare with", () => {
     const review = reviewFindings(
       report({ ...base, comparison: "unavailable", findings: [] }),
@@ -163,223 +185,95 @@ describe("reviewFindings", () => {
   });
 });
 
-describe("crossCheckRegressions", () => {
+describe("unselected mutants", () => {
   const mutant = (id: string, status: string, killedBy: string[] = []) => ({
     id,
-    mutatorName: "BooleanLiteral",
-    replacement: "true",
-    location: { start: { line: 3, column: 1 } },
-    status,
-    killedBy,
-  });
-  const reportOf = (source: string, mutants: readonly unknown[]) =>
-    report({
-      ...base,
-      findings: [],
-      files: { "src/core/a.ts": { source, mutants } },
-    });
-
-  it("reports a mutant of an unchanged file that was killed or timed out and is undetected now", () => {
-    const before = reportOf("code", [
-      mutant("timeout", "Timeout"),
-      mutant("killed", "Killed", ["src/core/a.test.ts#a"]),
-      mutant("survived", "Survived"),
-      mutant("still", "Killed", ["src/core/a.test.ts#a"]),
-    ]);
-    const after = reportOf("code", [
-      mutant("timeout", "NoCoverage"),
-      mutant("killed", "Survived"),
-      mutant("survived", "Survived"),
-      mutant("still", "Killed", ["src/core/a.test.ts#b"]),
-    ]);
-    expect(crossCheckRegressions(before, after)).toEqual([
-      { kind: "detectionRegression", key: "timeout", previousKillers: [] },
-      {
-        kind: "detectionRegression",
-        key: "killed",
-        previousKillers: ["src/core/a.test.ts#a"],
-      },
-    ]);
-  });
-
-  it("counts a baseline timeout only when the change can explain the loss", () => {
-    const before = reportOf("code", [
-      mutant("covered", "Timeout"),
-      mutant("changed", "Timeout"),
-    ]);
-    const after = report({
-      ...base,
-      findings: [],
-      testChanges: {
-        added: [],
-        changed: ["src/core/a.test.ts#t"],
-        removed: [],
-      },
-      files: {
-        "src/core/a.ts": {
-          source: "code",
-          mutants: [
-            {
-              ...mutant("covered", "Survived"),
-              coveredBy: ["src/core/a.test.ts#u"],
-            },
-            {
-              ...mutant("changed", "Survived"),
-              coveredBy: ["src/core/a.test.ts#t"],
-            },
-          ],
-        },
-      },
-    });
-    expect(crossCheckRegressions(before, after).map((f) => f.key)).toEqual([
-      "changed",
-    ]);
-  });
-
-  it("skips files whose source changed", () => {
-    expect(
-      crossCheckRegressions(
-        reportOf("old", [mutant("m", "Killed")]),
-        reportOf("new", [mutant("m", "Survived")]),
-      ),
-    ).toEqual([]);
-  });
-
-  it("fails the review with one error per mutant that mutator also reports", () => {
-    const before = reportOf("code", [
-      mutant("m", "Timeout"),
-      mutant("n", "Killed"),
-    ]);
-    const after = report({
-      ...base,
-      findings: [
-        { kind: "detectionRegression", key: "n", previousKillers: [] },
-      ],
-      files: {
-        "src/core/a.ts": {
-          source: "code",
-          mutants: [mutant("m", "NoCoverage"), mutant("n", "NoCoverage")],
-        },
-      },
-    });
-    const review = reviewFindings(after, before);
-    expect(review.exitCode).toBe(1);
-    expect(
-      review.lines.filter((line) => line.startsWith("::error")),
-    ).toHaveLength(2);
-    expect(review.lines.at(-1)).toBe(
-      "テストが弱くなった箇所: 2件、何も検出しない新しいテスト: 0件、テストが検出できないミュータント: 0件",
-    );
-  });
-});
-
-describe("recheck", () => {
-  const mutant = (id: string, status: string, killedBy: string[] = []) => ({
-    id,
-    mutatorName: "BooleanLiteral",
-    replacement: "true",
+    mutatorName: "Regex",
+    replacement: "/a/",
     location: { start: { line: 4, column: 1 } },
     status,
     killedBy,
   });
   const changed = "src/core/a.test.ts#changed";
-  const unrelated = "src/core/b.test.ts#unrelated";
+  const other = "src/core/b.test.ts#other";
   const baseReport = report({
     ...base,
     findings: [],
     files: {
       "src/core/a.ts": {
         mutants: [
-          mutant("mixed", "Killed", [changed, unrelated]),
-          mutant("changedOnly", "Killed", [changed]),
-          mutant("unchangedOnly", "Killed", [unrelated]),
-          mutant("edited", "Killed", [changed, unrelated]),
-          mutant("reported", "Killed", [changed, unrelated]),
+          mutant("moduleLevel", "Killed", [changed]),
+          mutant("missing", "Killed", [changed]),
+          mutant("ran", "Killed", [changed]),
+          mutant("otherKiller", "Killed", [other]),
+          mutant("edited", "Killed", [changed]),
+          mutant("timeout", "Timeout"),
         ],
       },
     },
   });
   const current = report({
     ...base,
-    findings: [{ kind: "detectionRegression", key: "reported" }],
+    findings: [],
     testChanges: { added: [], changed: [changed], removed: [] },
     files: {
       "src/core/a.ts": {
         mutants: [
-          mutant("mixed", "Killed", [changed, unrelated]),
-          mutant("changedOnly", "Killed", [changed]),
-          mutant("unchangedOnly", "Killed", [unrelated]),
-          mutant("edited", "Killed", [changed, unrelated]),
-          mutant("reported", "Survived"),
+          mutant("moduleLevel", "Pending"),
+          mutant("ran", "Killed", [changed]),
+          mutant("otherKiller", "Pending"),
+          mutant("edited", "Pending"),
+          mutant("timeout", "Pending"),
         ],
       },
     },
   });
   const scopes = (edited: string) =>
     new Map([
-      ["mixed", "s1"],
-      ["changedOnly", "s1"],
-      ["unchangedOnly", "s1"],
+      ["moduleLevel", "s"],
+      ["missing", "s"],
+      ["ran", "s"],
+      ["otherKiller", "s"],
       ["edited", edited],
-      ["reported", "s1"],
+      ["timeout", "s"],
     ]);
 
-  it("picks mutants killed by both changed and unchanged tests in an unchanged function", () => {
+  it("picks unchanged mutants a changed test killed at the base and this run did not decide", () => {
     expect(
-      recheckCandidates(baseReport, current, scopes("s1"), scopes("s2")),
-    ).toEqual(["mixed"]);
+      unselectedCandidates(baseReport, current, scopes("s"), scopes("t")),
+    ).toEqual(["missing", "moduleLevel"]);
   });
 
-  it("fails each mutant that a rerun did not detect", () => {
-    const rerun = (status: string) =>
-      report({
-        ...base,
-        findings: [],
-        files: { "src/core/a.ts": { mutants: [mutant("mixed", status)] } },
-      });
-    expect(
-      reviewRechecked(current, ["mixed"], [rerun("Killed"), rerun("Killed")]),
-    ).toEqual([]);
-    const lines = reviewRechecked(
-      current,
-      ["mixed"],
-      [rerun("Killed"), rerun("Survived")],
+  it("fails each mutant no test detects now, or whose status is unexpected", () => {
+    const rerun = report({
+      ...base,
+      findings: [],
+      files: {
+        "src/core/a.ts": {
+          mutants: [
+            mutant("moduleLevel", "Survived"),
+            mutant("missing", "Killed", [other]),
+            mutant("odd", "RuntimeError"),
+          ],
+        },
+      },
+    });
+    const lines = reviewUnselected(
+      baseReport,
+      ["moduleLevel", "missing", "odd", "absent"],
+      rerun,
     );
-    expect(lines).toHaveLength(1);
+    expect(lines).toHaveLength(3);
     expect(lines[0]).toMatch(
-      /^::error file=src\/core\/a\.ts,line=4,title=テストが弱くなった::変わっていないコードのミュータントmixed/,
+      /^::error file=src\/core\/a\.ts,line=4,title=テストが弱くなった::変わっていないコードのミュータントmoduleLevel/,
     );
     expect(lines[0]).toContain("mutator acceptで通さないでください");
-  });
-
-  it("catches the regressions mutator missed by reusing a baseline kill, in reports from mutator 0.4.5", () => {
-    const fixture = JSON.parse(
-      readFileSync(
-        new URL("./fixtures/mutator-0.4.5-reused-kill.json", import.meta.url),
-        "utf8",
-      ),
+    expect(lines[1]).toMatch(
+      /title=ミュータントの結果が想定と違う::.*RuntimeError/,
     );
-    const current = report(fixture.current);
-    expect(current.findings).toEqual([]);
-    const keys = recheckCandidates(
-      report(fixture.base),
-      current,
-      scopeHashes(fixture.baseSnapshot),
-      scopeHashes(fixture.currentSnapshot),
+    expect(lines[2]).toMatch(
+      /title=ミュータントの結果が想定と違う::.*ありません/,
     );
-    expect(keys).toHaveLength(14);
-    const lines = reviewRechecked(current, keys, [report(fixture.rerun)]);
-    expect(
-      lines.map((line) => /ミュータント([a-z0-9]+)/.exec(line)?.[1]),
-    ).toEqual([
-      "18e4gph9vjs",
-      "1gfsysf9ilu",
-      "1hzfnwizh8n",
-      "5zuqzzf1xb",
-      "d9lrij95oz",
-      "kvpjevjjvc",
-      "strzyhiu4g",
-    ]);
   });
 
   it("reads scope hashes from a format 2 snapshot only", () => {
@@ -393,6 +287,28 @@ describe("recheck", () => {
       new Map(),
     );
     expect(scopeHashes(null)).toEqual(new Map());
+  });
+});
+
+describe("mutator's text output", () => {
+  it("warns about a test the change skips", () => {
+    expect(
+      reviewSkippedTests(
+        "x\nwarning: src/core/a.test.ts:12 skips a test in the change, so it checks nothing: a skipped test\n",
+      ),
+    ).toEqual([
+      "::warning file=src/core/a.test.ts,line=12,title=飛ばしたテスト::変更の中でテストを飛ばしています（a skipped test）。飛ばしたテストは何も確かめません。",
+    ]);
+  });
+
+  it("fails when mutants of the diff were not run", () => {
+    expect(reviewNotRun("Killed 3 · Survived 1\nscore")).toEqual([]);
+    expect(reviewNotRun("Killed 3 · Pending 2\n")[0]).toMatch(
+      /^::error title=変更の範囲のミュータントが実行されなかった::.*Killed 3 · Pending 2/,
+    );
+    expect(
+      reviewNotRun("not run: 4 over the time budget (--time-budget)\n"),
+    ).toHaveLength(1);
   });
 });
 
@@ -440,9 +356,9 @@ describe("decodeReport", () => {
           ["a.ts", []],
           ["b.ts", []],
         ]),
-        sources: new Map(),
         changedTests: [],
         removedTests: [],
+        uncollected: [],
       },
     });
   });
@@ -481,6 +397,29 @@ describe("reviewSettingChanges", () => {
           `::warning file=${file},title=ミューテーションテストの設定が変わった::${file}が変わりました。検査する範囲が狭まっていないか、動作の変わるミュータントを記録していないかを確かめてください。`,
       ),
     );
+  });
+
+  it("warns about the review, package.json, lefthook.yml and the workflows", () => {
+    expect(
+      reviewSettingChanges([
+        "scripts/mutation-diff.sh",
+        "scripts/mutation-scope.ts",
+        "scripts/check-mutation-findings.ts",
+        "package.json",
+        "lefthook.yml",
+        ".github/workflows/ci.yml",
+        "scripts/lint-ja-space.ts",
+        "scripts/mutation-scope.test.ts",
+        "src/package.json",
+      ]).map((line) => /file=([^,]+)/.exec(line)?.[1]),
+    ).toEqual([
+      "scripts/mutation-diff.sh",
+      "scripts/mutation-scope.ts",
+      "scripts/check-mutation-findings.ts",
+      "package.json",
+      "lefthook.yml",
+      ".github/workflows/ci.yml",
+    ]);
   });
 
   it("warns about the Vitest config and the setup files it names", () => {

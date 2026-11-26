@@ -95,42 +95,16 @@ entrypoints  →  layers / services  →  core
   `chrome.*`、`browser.*`、`globalThis.chrome`）を検出する。`fallow audit`の
   `added-suppression`は`error`（新規の抑制コメントを拒否）。
 - **mutator**（`mutator.config.json`）: `src/core` / `src/services`のミュータントを実行する。
-  失敗にするのは、テストを弱めた変更。変わっていないコードのミュータントを基準ではテストが
-  検出していたのに、今はどのテストも検出しない場合を指す（mutatorの`detectionRegression`）。
-  `scripts/mutation-diff.sh`（`pnpm mutation:diff`）が、`git merge-base <base> HEAD`を一時的なworktreeに
-  取り出し、今の作業ツリーの環境ファイル（`package.json`、`pnpm-lock.yaml`、`pnpm-workspace.yaml`、
-  `.npmrc`、`tsconfig*.json`、`vitest.config.*`、`mutator.config.*`と、`scripts/mutation-scope.ts`が
-  Vitestの設定から解決する設定ファイル・`setupFiles`・`globalSetup`）を上書きして全件を実行し、
-  その結果を基準にする。基準の元の設定で集めていたテストファイルやmutatorの対象が、今も残っているのに
-  今の設定で外れていれば失敗にする（改名はgitの対応付けで追う）。前回の`.mutator`は使わない。続けて差分と変更したテストの分を
-  `--include-test-changes --kill-matrix`付きで実行し、`scripts/mutation-findings.ts`（純関数）と
-  `scripts/check-mutation-findings.ts`（`pnpm mutation:findings`）が判定する。基準と今のレポートも
-  突き合わせ、ソースが変わっていないファイルで基準では`Killed`（または、変更で説明できる`Timeout`）、
-  今は`Survived` / `NoCoverage`のミュータントも失敗にする（負荷で基準が`Timeout`になった時の見逃しを防ぐ）。
-  基準の検出したテストに変えたテストと変わっていないテストが混ざるミュータントは、`scripts/mutation-recheck.ts`が
-  前の結果を使わずに2回実行し直して確かめる（負荷で関係の無いテストが検出したテストに数えられた時の見逃しを防ぐ）。基準と比べられなかった
-  レポート（`comparison: "unavailable"`）や、形の違うレポート、基準を作れない時（worktreeの準備や
-  依存の導入に失敗した、ベースのテストが今の環境で落ちる、など）も失敗にする。何も検出しない新しいテスト（`newTestNoKills`）と
-  検出できないミュータントは警告、全件のスコアは表示だけ。`pnpm check`（とpre-push）は`origin/main`を
-  基準にし、無ければ飛ばす。CIの`mutation`ジョブはPRで同じスクリプトをベースブランチに対して実行する
-  （マージに必須のチェック）。所要時間は20秒ほど。基準を作れないと言われたら、まず通常のテストを直す。
-  テストが読むファイルを足したなら、`mutation:diff: copied`の行に入っているかを確かめ、無ければ
-  `scripts/mutation-diff.sh`が写すファイルに足す。
-  `src/core` / `src/services`を変えたら、`pnpm mutation:diff`の結果を見直す。検出できないミュータントは、
-  テストが足りないのか、コードが要らないのかを判断する。テストを足すときは、呼び出す側から見える
-  振る舞いを確かめる。ミュータントを落とすためだけに実装をなぞるテストは書かない。手順は
-  `node_modules/@mizchi/mutator/skills/mutation-test-loop/SKILL.md`に従う。
-  テストを弱めた変更と判定されたら、弱めたアサーションや消したテストを戻すか、同じ振る舞いを確かめる
-  テストを足す。等価ミュータントだけを`pnpm exec mutator accept <key> --reason <理由>`で
-  `mutator.accepted.json`に記録する（キーは`pnpm exec mutator --reporter agent`の`gaps[].key`）。
-  テストを弱めた変更を通すために記録してはいけない。ミューテーションテストから外すものは、
-  コメントではなく`mutator.config.json`の`exclude`に書く。PRで`mutator.config.*` /
-  `mutator.accepted.json`、`vitest.config.*`、`setupFiles` / `globalSetup`を変えると警告を出す。
-  これらと判定のスクリプト、`package.json`の`scripts`の変更は人が確かめる。mutatorを上げたら
-  `pnpm test:mutation-guard`（CIの`mutation`ジョブが毎回実行）で、判定が外れていないかを確かめる。
-  関数の書き換えと同時にテストを消すと警告だけになること、破壊的な依存の更新とテストの直しを同じPRに
-  入れると必ず失敗すること（直しを先に`main`へ入れる）、テストが読むデータの変更は検出しないことは、
-  READMEの「機械では確かめられないもの」を参照。
+  `pnpm check`（とpre-push）とCIの`mutation`ジョブが、`scripts/mutation-diff.sh`でテストを弱めた変更を
+  失敗にする。仕組みと、失敗・警告の条件、機械では確かめられないものはREADMEの「mutator」節にある。
+  - テストを弱めた変更と判定されたら、弱めたアサーションや消したテストを戻すか、同じ振る舞いを確かめる
+    テストを足す。`mutator accept`で通さない。`mutator.accepted.json`には等価ミュータントだけを記録する。
+  - ミューテーションテストから外すものは、コメントではなく`mutator.config.json`の`exclude`に書く。
+  - 検出できないミュータントは、テストが足りないのか、コードが要らないのかを判断する。テストを足すときは、
+    呼び出す側から見える振る舞いを確かめる。手順は`node_modules/@mizchi/mutator/skills/mutation-test-loop/SKILL.md`。
+  - テストの設定と準備ファイル、判定のスクリプト、`package.json`、`lefthook.yml`、ワークフローを変えると
+    警告が出る。警告の内容を確かめ、PRの説明に理由を書く。
+  - mutatorを上げたら`pnpm test:mutation-guard`で、判定が外れていないかを確かめる。
 - **TypeScript**（`tsconfig.json`）: `strict`、`noUncheckedIndexedAccess`、
   `exactOptionalPropertyTypes`、`noImplicitOverride`、`noPropertyAccessFromIndexSignature`、
   `noFallthroughCasesInSwitch`、`useUnknownInCatchVariables`、`verbatimModuleSyntax`、
@@ -165,8 +139,8 @@ pnpm test:e2e      # ビルド + Playwright
 pnpm fallow        # fallow（デッドコード / 循環依存 / 重複 / ヘルス / 境界）
 pnpm fallow:audit  # origin/main 基準の差分監査（新規のみ）
 pnpm mutation      # ミューテーションテスト（全件。レポートは .mutator/report）
-pnpm mutation:diff # origin/main との共通の祖先で基準を作り、差分と変更したテストの分を実行して、テストを弱めた変更なら失敗
-pnpm test:mutation-guard # 一時的なリポジトリで、テストを消すとmutation:diffが失敗することを確かめる
+pnpm mutation:diff # origin/mainとの共通の祖先で基準を作り、テストを弱めた変更なら失敗
+pnpm test:mutation-guard # mutation:diffが、テストを弱めた変更を今も見つけるかを確かめる
 pnpm mutation:findings # 直前の結果からテストを弱めた変更を判定（基準のrefを渡すと設定の変更も警告）
 pnpm check         # lint + typecheck + test + fallow + mutation:diff
 pnpm check:all     # check + coverage + build + e2e + dedupe
