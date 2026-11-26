@@ -99,16 +99,18 @@ entrypoints  →  layers / services  →  core
   検出していたのに、今はどのテストも検出しない場合を指す（mutatorの`detectionRegression`）。
   `scripts/mutation-diff.sh`（`pnpm mutation:diff`）が、`git merge-base <base> HEAD`を一時的なworktreeに
   取り出し、今の作業ツリーの環境ファイル（`package.json`、`pnpm-lock.yaml`、`pnpm-workspace.yaml`、
-  `.npmrc`、`tsconfig*.json`、`vitest.config.*`、`mutator.config.*`）を上書きして全件を実行し、
+  `.npmrc`、`tsconfig*.json`、`vitest.config.*`、`mutator.config.*`と、`scripts/vitest-config-files.ts`が
+  Vitestの設定から解決する設定ファイル・`setupFiles`・`globalSetup`）を上書きして全件を実行し、
   その結果を基準にする。前回の`.mutator`は使わない。続けて差分と変更したテストの分を
   `--include-test-changes --kill-matrix`付きで実行し、`scripts/mutation-findings.ts`（純関数）と
   `scripts/check-mutation-findings.ts`（`pnpm mutation:findings`）が判定する。基準と比べられなかった
-  レポート（`comparison: "unavailable"`）や、形の違うレポートも失敗にする。基準を作れない時
-  （ベースのテストが今の依存で落ちる、など）は警告だけ。何も検出しない新しいテスト（`newTestNoKills`）と
+  レポート（`comparison: "unavailable"`）や、形の違うレポート、基準を作れない時（worktreeの準備や
+  依存の導入に失敗した、ベースのテストが今の環境で落ちる、など）も失敗にする。何も検出しない新しいテスト（`newTestNoKills`）と
   検出できないミュータントは警告、全件のスコアは表示だけ。`pnpm check`（とpre-push）は`origin/main`を
   基準にし、無ければ飛ばす。CIの`mutation`ジョブはPRで同じスクリプトをベースブランチに対して実行する
-  （マージに必須のチェック）。所要時間は20秒ほど。Vitestに`setupFiles` / `globalSetup`を足したら、
-  そのファイルも環境ハッシュに入るので`scripts/mutation-diff.sh`が写すファイルに足す。
+  （マージに必須のチェック）。所要時間は20秒ほど。基準を作れないと言われたら、まず通常のテストを直す。
+  テストが読むファイルを足したなら、`mutation:diff: copied`の行に入っているかを確かめ、無ければ
+  `scripts/mutation-diff.sh`が写すファイルに足す。
   `src/core` / `src/services`を変えたら、`pnpm mutation:diff`の結果を見直す。検出できないミュータントは、
   テストが足りないのか、コードが要らないのかを判断する。テストを足すときは、呼び出す側から見える
   振る舞いを確かめる。ミュータントを落とすためだけに実装をなぞるテストは書かない。手順は

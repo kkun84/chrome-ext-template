@@ -271,17 +271,22 @@ pnpm mutation:findings # 直前の結果（.mutator/report/mutation.json）か�
 
 1. `git merge-base origin/main HEAD`のコミットを、一時ディレクトリに`git worktree add --detach`で取り出す。
 2. そこへ今の作業ツリーの`package.json`、`pnpm-lock.yaml`、`pnpm-workspace.yaml`、`.npmrc`、
-   `tsconfig*.json`、`vitest.config.*`、`mutator.config.*`を上書きする。mutatorは、Node.jsの版、
+   `tsconfig*.json`、`vitest.config.*`、`mutator.config.*`と、Vitestの設定から解決した設定ファイル・
+   `setupFiles`・`globalSetup`（`scripts/vitest-config-files.ts`）を上書きする。mutatorは、Node.jsの版、
    mutatorの設定、これらのファイルの中身から作る環境ハッシュが一致する時だけ、基準と比べるため。
 3. `pnpm install --frozen-lockfile --offline --ignore-scripts`と`wxt prepare`の後、全件を実行する。
 4. 作業ツリーの`.mutator`を捨てて基準のsnapshotに置き換え、
    `mutator --since <共通の祖先> --include-test-changes --kill-matrix`で差分と、変更したテストが確かめる
    コードのミュータントを実行し、`scripts/check-mutation-findings.ts`で判定する。worktreeは最後に消す。
 
-- 基準を作れない時（ベースのテストが今の依存で落ちる、など）は、理由を警告に出して失敗にしません。
-- 基準を作ったのにmutatorが比べられなかった（レポートの`comparison`が`unavailable`）時は、仕組みの故障として
-  失敗にします。Vitestに`setupFiles` / `globalSetup`を足すと、そのファイルも環境ハッシュに入るので、
-  `scripts/mutation-diff.sh`が写すファイルに足してください。
+- 基準を作れない時（worktreeの準備や依存の導入に失敗した、ベースのテストが今の環境で落ちる、など）も
+  失敗にします。通すと、ベースのテストを動かなくする変更とテストを消す変更を同時に入れた時に見逃すため
+  です。多くは依存の更新でテストが壊れた時で、その場合は通常のテストも落ちます。エラーには出力の末尾と
+  直し方を書きます。テストが読むファイル（`setupFiles`から読む設定など）を足した時は、
+  `mutation:diff: copied`の行に入っているかを確かめ、入っていなければ`scripts/mutation-diff.sh`が写す
+  ファイルに足してください。
+- 基準を作ったのにmutatorが比べられなかった（レポートの`comparison`が`unavailable`）時も、仕組みの故障として
+  失敗にします。
 - レポートが壊れている、形が違う（`schemaVersion`が`2`でない、`findings` / `comparison`が無い）、
   基準のrefが無い時も失敗にします。
 - 所要時間は、このテンプレートで20秒ほどです（基準の全件が大半）。`--kill-matrix`の分は数秒です。
@@ -314,7 +319,7 @@ pnpm mutation:findings # 直前の結果（.mutator/report/mutation.json）か�
 
 1. `package.json`の`mutation` / `mutation:diff` / `mutation:findings`スクリプト、`check`の
    `&& pnpm mutation:diff`、`clean`の`.mutator`
-2. `scripts/mutation-diff.sh`、`scripts/mutation-findings.ts` / `scripts/check-mutation-findings.ts`とそのテスト、
+2. `scripts/mutation-diff.sh`、`scripts/vitest-config-files.ts`とそのテスト、`scripts/mutation-findings.ts` / `scripts/check-mutation-findings.ts`とそのテスト、
    `scripts/fixtures/mutator-*.json`
 3. `mutator.config.json`と`mutator.accepted.json`
 4. devDependencyの`@mizchi/mutator`（`pnpm remove @mizchi/mutator`）
