@@ -61,7 +61,7 @@ entrypoints  →  layers / services  →  core
 
 ## Machine-enforced rules
 
-規約は文章だけでなく、次のツールで機械的に強制されます（mutatorを除き、すべて`error`）。
+規約は文章だけでなく、次のツールで機械的に強制されます（mutatorはテストを弱めた変更だけが`error`、他はすべて`error`）。
 
 - **Biome**（`biome.json`、`pnpm lint` = `biome ci .`）:
   format / recommended lint、`noExplicitAny`（`any`禁止）、`noImplicitAnyLet`、
@@ -94,15 +94,22 @@ entrypoints  →  layers / services  →  core
   services → core`）と、coreゾーンでの禁止呼び出し（`Date.now`、`Math.random`、
   `chrome.*`、`browser.*`、`globalThis.chrome`）を検出する。`fallow audit`の
   `added-suppression`は`error`（新規の抑制コメントを拒否）。
-- **mutator**（`mutator.config.json`）: `src/core` / `src/services`のミュータントを実行し、
-  テストが検出できないミュータントを表示する。失敗にはしない。`pnpm check`は`pnpm mutation:diff`で
-  `origin/main`との差分だけを実行する。CIの`mutation`ジョブは、PRで変更した行の検出漏れを
-  警告として表示し、全件のスコアをジョブの概要に出す（テストを消しただけの変更はここで分かる）。
+- **mutator**（`mutator.config.json`）: `src/core` / `src/services`のミュータントを実行する。
+  失敗にするのは、テストを弱めた変更だけ。変わっていないコードのミュータントを前の結果では
+  テストが検出していたのに、今はどのテストも検出しない場合を指す（mutatorの`detectionRegression`）。
+  判定は`scripts/mutation-findings.ts`（純関数）と`scripts/check-mutation-findings.ts`
+  （`pnpm mutation:findings`。`.mutator/report/mutation.json`を読む）が行う。何も検出しない新しい
+  テスト（`newTestNoKills`）は警告、検出できないミュータントと全件のスコアは表示だけ。
+  `pnpm check`（とpre-push）は`pnpm mutation:diff`で`origin/main`との差分と、変更したテストが
+  確かめるコードを`--include-test-changes`付きで実行し、判定まで行う。比べる基準は手元の`.mutator`の
+  前回の結果で、無ければ`pnpm mutation`で作る。CIの`mutation`ジョブは、`main`へのpushで全件を
+  実行して結果をartifactに保存し、PRではそれを基準に判定する（マージに必須のチェック）。
   `src/core` / `src/services`を変えたら、`pnpm mutation:diff`の結果を見直す。検出できないミュータントは、
   テストが足りないのか、コードが要らないのかを判断する。テストを足すときは、呼び出す側から見える
   振る舞いを確かめる。ミュータントを落とすためだけに実装をなぞるテストは書かない。手順は
   `node_modules/@mizchi/mutator/skills/mutation-test-loop/SKILL.md`に従う。
-  等価ミュータントだけを`pnpm exec mutator accept <key> --reason <理由>`で
+  テストを弱めた変更と判定されたら、弱めたアサーションや消したテストを戻すか、同じ振る舞いを確かめる
+  テストを足す。等価ミュータントだけを`pnpm exec mutator accept <key> --reason <理由>`で
   `mutator.accepted.json`に記録する（キーは`pnpm exec mutator --reporter agent`の`gaps[].key`）。
   テストを弱めた変更を通すために記録してはいけない。ミューテーションテストから外すものは、
   コメントではなく`mutator.config.json`の`exclude`に書く。PRで`mutator.config.*` /
@@ -117,7 +124,8 @@ entrypoints  →  layers / services  →  core
   日本語タイポグラフィの`--fix`、pre-pushは`pnpm check`。globは再帰形（`**/*.{...}`）で
   サブディレクトリのファイルも対象にする。
 - **CI**（`.github/workflows/ci.yml`）: `pnpm lint`（`biome ci`）、fallow、typecheck、
-  tests + coverage、mutation（全件。結果の表示だけ）、build、e2e、nix flake check + shellcheck/actionlint、
+  tests + coverage、mutation（PRではテストを弱めた変更で失敗。全件のスコアは表示だけ）、build、e2e、
+  nix flake check + shellcheck/actionlint、
   `pnpm dedupe --check`。`pnpm audit`は週1回の定期実行だけで動く。
 
 ## よく使うコマンド
@@ -140,7 +148,8 @@ pnpm test:e2e      # ビルド + Playwright
 pnpm fallow        # fallow（デッドコード / 循環依存 / 重複 / ヘルス / 境界）
 pnpm fallow:audit  # origin/main 基準の差分監査（新規のみ）
 pnpm mutation      # ミューテーションテスト（全件。レポートは .mutator/report）
-pnpm mutation:diff # origin/main との差分だけ実行
+pnpm mutation:diff # origin/main との差分と変更したテストの分を実行し、テストを弱めた変更なら失敗
+pnpm mutation:findings # 直前の結果からテストを弱めた変更を判定（基準のrefを渡すと設定の変更も警告）
 pnpm check         # lint + typecheck + test + fallow + mutation:diff
 pnpm check:all     # check + coverage + build + e2e + dedupe
 pnpm clean         # 生成物（.output / .wxt / coverage 等）を削除

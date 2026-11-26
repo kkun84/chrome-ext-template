@@ -8,7 +8,7 @@ Windows + WSLで開発し、Windows側のChromeにunpacked拡張として読み�
 - **TypeScript 7.0.2** — Goネイティブの`tsc`（型チェック専用。ビルドと検査はTS JS APIを使わない。mutatorだけが型エラーになるミュータントの判定に`typescript/unstable/sync`を使う）
 - **Vitest 5** — `src/core`の純関数ユニットテスト（カバレッジは`@vitest/coverage-v8`）
 - **Playwright 1.59.1** — ビルド済み拡張のE2E（nixpkgs `playwright-driver`と一致させるため固定）
-- **mutator 0.2.0** — ミューテーションテスト（CIは全件、`pnpm check`は差分だけ実行）
+- **mutator 0.4.5** — ミューテーションテスト（CIは全件、`pnpm check`は差分だけ実行。テストを弱めた変更は失敗にする）
 - **Biome 2.6.4** — lint / format（`pnpm lint` = `biome ci`、assistでimport整理）
 - **rumdl 0.3.2** — Markdownのlint（`pnpm lint:md`、日本語ドキュメントのため`MD013`のみ無効）
 - **fallow 3.42.0** — デッドコード / 循環依存 / 重複 / ヘルススコア / アーキテクチャ境界の解析
@@ -153,7 +153,7 @@ Nix外でローカル検証する場合のみ`CHROME_PATH=/usr/bin/google-chrome
 | -------------------- | -------------------------------------------------------------------- |
 | `lint`               | `pnpm lint`（`biome ci` + `rumdl check` + ja-space + pnpm-policy + no-suppress）。続けて`pnpm dedupe:check`を実行 |
 | `audit (weekly)`     | `pnpm run audit`。週1回の定期実行のときだけ動く（PRでは動かない） |
-| `mutation`           | ミューテーションテスト。PRでは変更した行の検出漏れを警告として表示し、続けて全件のスコアをジョブの概要（Summary）に出す。失敗にはしない |
+| `mutation`           | ミューテーションテスト。PRでは`main`の結果と比べ、テストを弱めた変更なら失敗する。変更した行の検出漏れと、何も検出しない新しいテストは警告にする。全件のスコアをジョブの概要（Summary）に出す。`main`へのpushでは全件の結果をartifact `mutator-results`に保存する |
 | `fallow`             | `pnpm fallow`（デッドコード / 循環依存 / 重複 / ヘルス / 境界）。PRでは`fallow audit --gate new-only`も実行 |
 | `typecheck`          | `pnpm typecheck`（`wxt prepare && tsc --noEmit`）                    |
 | `test`               | `pnpm test:coverage` → カバレッジartifact `coverage`                |
@@ -249,20 +249,37 @@ pnpm fallow:audit    # origin/main 基準の差分監査（新規の問題のみ
 対象は`mutator.config.json`の`include`（`src/core`と`src/services`）です。
 
 ```bash
-pnpm mutation       # 全件を実行。レポートは .mutator/report/index.html
-pnpm mutation:diff  # origin/main との差分にあるミュータントだけ実行
+pnpm mutation          # 全件を実行。レポートは .mutator/report/index.html
+pnpm mutation:diff     # origin/main との差分と、変更したテストが確かめるコードのミュータントを実行し、続けて mutation:findings で判定
+pnpm mutation:findings # 直前の結果（.mutator/report/mutation.json）から、テストを弱めた変更を判定
 ```
 
-結果は、テストを見直すための指標です。検出できないミュータント（生き残りと、どのテストも届かないもの）が
-あっても失敗にはしません。テストが元々落ちている場合だけ失敗します。
+失敗にするのは、テストを弱めた変更だけです。変わっていないコードのミュータントを、前の結果では
+テストが検出していたのに、今はどのテストも検出しない場合を指します（mutatorの`detectionRegression`）。
+アサーションを弱めたり、テストを消したりした変更がこれに当たります。それ以外は失敗にしません。
 
-- **手元**: `pnpm check`の最後で`pnpm mutation:diff`を実行します。差分にミュータントが無ければ、
-  テストを1回流すだけで終わります。`origin/main`が無い環境（`.git`の無い展開先や浅いclone）では、
+- 何も検出しない新しいテスト（`newTestNoKills`）は警告にします。
+- 検出できないミュータント（生き残りと、どのテストも届かないもの）は表示だけです。全件のスコアも表示だけです。
+- 比べる前の結果が無い時は、その旨を表示して失敗にしません。依存、ロックファイル、`tsconfig.json`、
+  Node.jsの版、mutatorの設定のどれかが変わった時も、前の結果とは比べられません。
+- テストが元々落ちている場合も失敗します。
+
+テストを弱めた変更と判定されたら、弱めたアサーションや消したテストを戻すか、同じ振る舞いを確かめる
+テストを足します。`mutator accept`で通してはいけません。`mutator.accepted.json`は等価ミュータント専用です。
+
+- **手元**: `pnpm check`の最後で`pnpm mutation:diff`を実行します。pre-pushも`pnpm check`なので、
+  テストを弱めた変更ならpushが止まります。比べる基準は、手元の`.mutator`にある前回の結果です。
+  基準を作るには、テストを弱める前に`pnpm mutation`で全件を実行しておきます（cloneの直後や、
+  依存を変えた後など）。`origin/main`が無い環境（`.git`の無い展開先や浅いclone）では、
   その旨を表示して何もしません。
-- **CI**: `mutation`ジョブが、PRでは変更した行のミュータントを実行し、検出できなかったもの
-  （どのテストも届かないものを含む）をPRの差分に警告として表示します。続けて`pnpm mutation`で
-  全件を実行し、全体のスコアを出します。テストを弱めたり消したりしただけの変更は、全件の結果に
-  現れます。
+- **CI**: `mutation`ジョブは、`main`へのpushで全件を実行し、`.mutator`をartifact `mutator-results`
+  として保存します。PRでは、ベースブランチの最新の`mutator-results`を復元し、
+  `mutator --since origin/<base> --include-test-changes --kill-matrix`で変更した行と、変更したテストが
+  確かめるコードのミュータントを実行します。検出できなかったものはPRの差分に警告として表示します。
+  続けて`pnpm mutation:findings origin/<base>`で判定し、テストを弱めた変更ならジョブを失敗にします。
+  `mutator.config.*` / `mutator.accepted.json`を変えたPRには警告を出します。最後に全件を実行し、
+  全体のスコアをジョブの概要に出します。`.github/settings/ruleset-main.json`は、`mutation`を
+  マージに必須のチェックにしています。
 - `pnpm mutation` / `pnpm mutation:diff`を単独で実行する前に、`pnpm typecheck`（または
   `pnpm exec wxt prepare`）で`.wxt/`を作っておきます。`pnpm test`と同じ前提です。
 - 検出できなかったミュータントは、テストが足りないのか、コードが要らないのかを考えます。
@@ -278,15 +295,16 @@ pnpm mutation:diff  # origin/main との差分にあるミュータントだけ�
 
 外すときは、次を消します。
 
-1. `package.json`の`mutation` / `mutation:diff`スクリプト、`check`の`&& pnpm mutation:diff`、
-   `clean`の`.mutator`
-2. `mutator.config.json`と`mutator.accepted.json`
-3. devDependencyの`@mizchi/mutator`（`pnpm remove @mizchi/mutator`）
-4. `.github/workflows/ci.yml`の`mutation`ジョブと、`.github/settings/ruleset-main.json`の
+1. `package.json`の`mutation` / `mutation:diff` / `mutation:findings`スクリプト、`check`の
+   `&& pnpm mutation:diff`、`clean`の`.mutator`
+2. `scripts/mutation-findings.ts` / `scripts/check-mutation-findings.ts`とそのテスト
+3. `mutator.config.json`と`mutator.accepted.json`
+4. devDependencyの`@mizchi/mutator`（`pnpm remove @mizchi/mutator`）
+5. `.github/workflows/ci.yml`の`mutation`ジョブと、`.github/settings/ruleset-main.json`の
    `mutation`
-5. `.mutator`の除外（`.gitignore`、`biome.json`、`.rumdl.toml`、`.fallowrc.json`、
+6. `.mutator`の除外（`.gitignore`、`biome.json`、`.rumdl.toml`、`.fallowrc.json`、
    `scripts/ja-space-files.ts`）
-6. `AGENTS.md`とこのREADMEのmutatorの記述
+7. `AGENTS.md`とこのREADMEのmutatorの記述
 
 ## lefthook（Gitフック）
 
@@ -295,7 +313,7 @@ pnpm mutation:diff  # origin/main との差分にあるミュータントだけ�
 - フックは`prepare`スクリプト（`pnpm install` → `lefthook install`）でインストールされます。
 - フックをスキップするには`LEFTHOOK=0`を設定します（例: `LEFTHOOK=0 git commit ...`）。
 - `pre-commit`はstagedの対象ファイルに`biome check --write`（`**/*.{js,jsx,ts,tsx,json,css}`）と`rumdl check`（`**/*.md`）、日本語タイポグラフィの`--fix`（`**/*.{md,ts,tsx,js,yml,yaml,sh,html}`）を実行し、修正をstageします。globは再帰形なのでサブディレクトリのファイルも対象です。
-- `pre-push`は`pnpm check`（lint + typecheck + test + fallow + mutation:diff）を実行します。
+- `pre-push`は`pnpm check`（lint + typecheck + test + fallow + mutation:diff）を実行します。テストを弱めた変更は`mutation:diff`で止まります（[mutator](#mutatorミューテーションテスト)）。
 - 設定は [`lefthook.yml`](./lefthook.yml)。
 - `lefthook`は`2.2.1`に固定しています。npm provenanceを持ち、かつ7日ポリシーを満たす後続リリースが出るまでは`2.2.1`のままにします（その条件を満たした時点で上げます）。
 
@@ -395,7 +413,8 @@ Markdownは[rumdl](https://github.com/rvben/rumdl) 0.3.2で検査します（`pn
 | `pnpm fallow`     | fallowでデッドコード / 循環依存 / 重複 / ヘルス / 境界を解析 |
 | `pnpm fallow:audit` | `origin/main`を基準にしたfallow監査（新規のみ） |
 | `pnpm mutation`   | ミューテーションテスト（`src/core` / `src/services`の全件。結果を表示するだけ） |
-| `pnpm mutation:diff` | `origin/main`との差分にあるミュータントだけ実行。結果を表示するだけ |
+| `pnpm mutation:diff` | `origin/main`との差分と、変更したテストが確かめるコードのミュータントを実行し、`mutation:findings`で判定。テストを弱めた変更なら失敗する |
+| `pnpm mutation:findings` | 直前の結果から、テストを弱めた変更（失敗）と何も検出しない新しいテスト（警告）をGitHub Actionsの注釈の形で出す。基準のref（例: `origin/main`）を渡すと、`mutator.config.*` / `mutator.accepted.json`の変更も警告する |
 | `pnpm check`      | `lint` + `typecheck` + `test` + `fallow` + `mutation:diff` |
 | `pnpm check:all`  | `check` + `test:coverage` + `build` + `test:e2e` + `dedupe:check` |
 | `pnpm clean`      | 生成物（`.output` / `.wxt` / `coverage`等）を削除 |
