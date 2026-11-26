@@ -476,6 +476,7 @@ Markdownは[rumdl](https://github.com/rvben/rumdl) 0.3.2で検査します（`pn
 | `pnpm fallow:audit` | `origin/main`を基準にしたfallow監査（新規のみ） |
 | `pnpm mutation`   | ミューテーションテスト（`src/core` / `src/services`の全件。結果を表示するだけ） |
 | `pnpm mutation:diff` | `origin/main`との共通の祖先で全件を実行して基準を作り、差分と変更したテストが確かめるコードのミュータントを実行して判定。テストを弱めた変更なら失敗する（`scripts/mutation-diff.sh`） |
+| `pnpm mutation:recheck <dir>` | `mutation:diff`の中で使う。基準の検出したテストに変えたテストと変わっていないテストが混ざるミュータントを、前の結果を使わずに実行し直す（`<dir>`は基準のレポートとsnapshotの置き場） |
 | `pnpm test:mutation-guard` | 一時的なリポジトリで、変更が無ければ`mutation:diff`が通り、テストを消すと失敗することを確かめる（mutatorを上げた時の見張り。CIで毎回実行） |
 | `pnpm mutation:findings` | 直前の結果から、テストを弱めた変更と基準と比べられなかった結果（失敗）、何も検出しない新しいテストと検出できないミュータント（警告）をGitHub Actionsの注釈の形で出す。基準のref（例: `origin/main`）を渡すと、`mutator.config.*` / `mutator.accepted.json`の変更も警告する |
 | `pnpm check`      | `lint` + `typecheck` + `test` + `fallow` + `mutation:diff` |

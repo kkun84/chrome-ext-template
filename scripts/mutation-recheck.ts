@@ -39,71 +39,102 @@ const readReport = (path: string): MutationReport => {
   return decoded.report;
 };
 
-const main = (): number => {
-  const work = process.argv[2];
-  if (work === undefined) {
-    throw new Error("usage: mutation-recheck.ts <work-dir>");
-  }
+/** The mutants to run again, with the current report. */
+const candidates = (
+  work: string,
+): { readonly current: MutationReport; readonly keys: readonly string[] } => {
   const baseSnapshot = join(work, "base-snapshot.json");
   const currentSnapshot = ".mutator/snapshot.json";
-  if (!existsSync(baseSnapshot) || !existsSync(currentSnapshot)) {
-    return 0;
-  }
   const current = readReport(".mutator/report/mutation.json");
+  if (!existsSync(baseSnapshot) || !existsSync(currentSnapshot)) {
+    return { current, keys: [] };
+  }
   const keys = recheckCandidates(
     readReport(join(work, "base-report.json")),
     current,
     scopeHashes(readJson(baseSnapshot)),
     scopeHashes(readJson(currentSnapshot)),
   );
+  return { current, keys };
+};
+
+/** One `mutator --only` run with no `.mutator`: its report, or the failure. */
+const rerun = (
+  keys: readonly string[],
+  directory: string,
+): MutationReport | string => {
+  rmSync(".mutator", { recursive: true, force: true });
+  const result = spawnSync(
+    "pnpm",
+    [
+      "exec",
+      "mutator",
+      ...keys.flatMap((key) => ["--only", key]),
+      "--reporter",
+      "json",
+      "--report-dir",
+      directory,
+    ],
+    { encoding: "utf8", env: { ...process.env, GITHUB_ACTIONS: "" } },
+  );
+  const path = join(directory, "mutation.json");
+  return result.status === 0 && existsSync(path)
+    ? readReport(path)
+    : `${result.stdout}${result.stderr}`
+        .trim()
+        .split("\n")
+        .slice(-8)
+        .join("\n");
+};
+
+/** Rerun `RECHECKS` times, keeping the current `.mutator` aside meanwhile. */
+const rerunAll = (
+  keys: readonly string[],
+  work: string,
+): readonly MutationReport[] | string => {
+  const held = join(work, "held-mutator");
+  cpSync(".mutator", held, { recursive: true });
+  try {
+    const reports: MutationReport[] = [];
+    for (let attempt = 1; attempt <= RECHECKS; attempt += 1) {
+      const result = rerun(keys, join(work, `recheck-${attempt}`));
+      if (typeof result === "string") {
+        return result;
+      }
+      reports.push(result);
+    }
+    return reports;
+  } finally {
+    rmSync(".mutator", { recursive: true, force: true });
+    cpSync(held, ".mutator", { recursive: true });
+  }
+};
+
+const workDirectory = (): string => {
+  const work = process.argv[2];
+  if (work === undefined) {
+    throw new Error("usage: mutation-recheck.ts <work-dir>");
+  }
+  return work;
+};
+
+const main = (): number => {
+  const work = workDirectory();
+  const { current, keys } = candidates(work);
   if (keys.length === 0) {
     return 0;
   }
   process.stderr.write(
     `mutation:diff: running ${keys.length} mutants again without the previous results (${RECHECKS} times): ${keys.join(" ")}\n`,
   );
-  const held = join(work, "held-mutator");
-  cpSync(".mutator", held, { recursive: true });
-  const reruns: MutationReport[] = [];
-  try {
-    for (let attempt = 1; attempt <= RECHECKS; attempt += 1) {
-      rmSync(".mutator", { recursive: true, force: true });
-      const directory = join(work, `recheck-${attempt}`);
-      const result = spawnSync(
-        "pnpm",
-        [
-          "exec",
-          "mutator",
-          ...keys.flatMap((key) => ["--only", key]),
-          "--reporter",
-          "json",
-          "--report-dir",
-          directory,
-        ],
-        {
-          encoding: "utf8",
-          env: { ...process.env, GITHUB_ACTIONS: "" },
-        },
-      );
-      const path = join(directory, "mutation.json");
-      if (result.status !== 0 || !existsSync(path)) {
-        process.stdout.write(
-          `${
-            failure(
-              "ミューテーションテストの実行し直しが失敗した",
-              `mutator --onlyが失敗しました: ${`${result.stdout}${result.stderr}`.trim().split("\n").slice(-8).join("\n")}`,
-            ).lines[0]
-          }\n`,
-        );
-        return 1;
-      }
-      reruns.push(readReport(path));
-    }
-  } finally {
-    rmSync(".mutator", { recursive: true, force: true });
-    cpSync(held, ".mutator", { recursive: true });
-  }
-  const lines = reviewRechecked(current, keys, reruns);
+  const reruns = rerunAll(keys, work);
+  const lines =
+    typeof reruns === "string"
+      ? failure(
+          "ミューテーションテストの実行し直しが失敗した",
+          `mutator --onlyが失敗しました: ${reruns}`,
+        ).lines
+      : reviewRechecked(current, keys, reruns);
   process.stdout.write(lines.map((line) => `${line}\n`).join(""));
   return lines.length === 0 ? 0 : 1;
 };

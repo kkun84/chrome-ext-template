@@ -28,6 +28,7 @@
     "mutation": "mutator",
     "mutation:diff": "bash scripts/mutation-diff.sh --kill-matrix --skip-without-base origin/main",
     "test:mutation-guard": "bash scripts/mutation-guard.sh",
+    "mutation:recheck": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/mutation-recheck.ts",
     "mutation:findings": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/check-mutation-findings.ts",
     "fallow:audit": "fallow audit --base origin/main",
     "settings:check": "bash scripts/github-settings.sh --check",
