@@ -322,7 +322,7 @@ pnpm test:mutation-guard  # mutation:diffが、テストを弱めた変更を今
 - `.mutator`がgitで追跡されている。
 
 所要時間は、このテンプレートで、手元のpre-push相当が30〜40秒（基準の全件が大半）、CIの判定が20秒ほど、
-`pnpm test:mutation-guard`が2分半〜4分です。
+`pnpm test:mutation-guard`がCIで4分ほどです。
 
 ### 機械では確かめられないもの
 
