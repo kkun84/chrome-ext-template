@@ -12,6 +12,8 @@ describe("onlyArguments", () => {
       "b",
       "--kill-matrix",
       "--reporter",
+      "text",
+      "--reporter",
       "json",
       "--report-dir",
       "/tmp/x",

@@ -16,15 +16,28 @@
 #    resolved from the config by scripts/mutation-scope.ts. Copying them
 #    makes the baseline's hash equal this checkout's, so a change to them
 #    cannot turn the comparison off.
-# 3. Install offline, prepare WXT and run every mutant there.
+# 3. Install offline, prepare WXT and run every mutant there. The run must
+#    leave no mutant Pending: `timeBudget` or `mutantsPerLine` in the settings
+#    would cut it short and leave no Killed to compare with, so a Pending
+#    mutant fails. `since` and `shard`, which no flag can undo, fail before
+#    the run (scripts/mutation-scope.ts full-run). The reporters and the
+#    report directory are given on the command line, so the settings cannot
+#    move or drop the report.
+# 3b. When mutator's settings changed, run every mutant there again with the
+#    base's own settings. scripts/mutation-unselected.ts fails when a mutant
+#    the new settings take out (excludedMutators, weakMutation, ...) was
+#    killed by a changed or removed test: the baseline made with the new
+#    settings lacks it as well, so weakening that test would look like
+#    nothing.
 # 4. With the base's own Vitest and mutator settings, list the test files
 #    Vitest collected and the files mutator mutated at the base. Fail when one
 #    still exists (under its new name after a rename) but the current
 #    settings leave it out: narrowing include / exclude drops it from the
 #    baseline and the change alike, so nothing would look weaker.
 # 5. Replace this checkout's .mutator with the baseline's snapshots, run
-#    `mutator --since <merge-base> --include-test-changes --kill-matrix` and
-#    review the report with scripts/check-mutation-findings.ts.
+#    `mutator --since <merge-base> --include-test-changes --kill-matrix
+#    --reporter text --reporter json` and review the report with
+#    scripts/check-mutation-findings.ts.
 #    --kill-matrix is always on: besides reporting new tests that detect
 #    nothing, it keeps mutator from reusing a baseline Killed for a mutant of
 #    the diff (mutator-core's plan.ts reuses a kill under --kill-matrix only
@@ -33,7 +46,8 @@
 # 6. scripts/mutation-unselected.ts runs, with --only, the mutants a changed
 #    or removed test killed at the base but the diff did not select (a mutant
 #    at module level is covered by no test, so --include-test-changes misses
-#    it).
+#    it). A test whose file, or a file it loads (a helper), changed counts as
+#    changed.
 #
 # Exit codes: 0 when the tests kept their strength. 1 when the tests got
 # weaker or left out, when mutants of the diff were not run, when no baseline
@@ -95,31 +109,51 @@ if [ -n "$(git ls-files -- .mutator | head -n 1)" ]; then
   exit 1
 fi
 
-# Two runs in one checkout would fight over .mutator. The lock holds the PID
-# of the run; a lock whose process is gone was left by a killed run.
+# Two runs in one checkout would fight over .mutator. The lock is an flock(2)
+# on .git/mutation-diff.lock, which the kernel drops when the process dies,
+# even by SIGKILL, so a killed run leaves no stale lock and two runs cannot
+# both take one over. The file is never removed: a run that opened the old
+# file and one that created a new file could both hold a lock. It holds the
+# PID and the temporary directory of the run that holds it; a run killed
+# before its EXIT trap leaves them, and the next run removes that worktree.
+# The children inherit fd 9, so when only this shell is killed, the lock
+# stays until the mutator and pnpm it started have exited too: they still
+# write into the worktree and .mutator.
 lock=$(git rev-parse --path-format=absolute --git-path mutation-diff.lock)
-take_lock() { (set -o noclobber && echo "$$" >"$lock") 2>/dev/null; }
-if ! take_lock; then
-  holder=$(cat "$lock" 2>/dev/null || true)
-  if [ -n "$holder" ] && kill -0 "$holder" 2>/dev/null; then
-    echo "::error title=mutation:diffが動いている::同じ作業ツリーで、別のmutation:diff（プロセス${holder}）が動いています。終わってから実行してください。"
-    exit 1
-  fi
-  rm -f "$lock"
-  if ! take_lock; then
-    echo "::error title=mutation:diffのロックを取れない::${lock}を作れません。"
-    exit 1
-  fi
+exec 9>>"$lock"
+if command -v flock >/dev/null 2>&1; then
+  locked() { flock -n 9; }
+else
+  # macOS has no flock command. perl's flock uses flock(2) on the same open
+  # file, which stays locked after perl exits while this shell keeps fd 9.
+  locked() { perl -MFcntl=:flock -e 'open(my $f, ">&=", 9) or exit 2; flock($f, LOCK_EX | LOCK_NB) or exit 1'; }
 fi
+if ! locked; then
+  holder=$(head -n 1 "$lock" 2>/dev/null || true)
+  echo "::error title=mutation:diffが動いている::同じ作業ツリーで、別のmutation:diff（プロセス${holder:-不明}か、それが起動したプロセス）が動いています。終わってから実行してください。"
+  exit 1
+fi
+# What a killed run left: its worktree registration and temporary directory.
+left=$(sed -n 2p "$lock")
+echo "$$" >"$lock"
+case "$left" in
+  */mutation-base.*)
+    git worktree remove --force "$left/tree" >/dev/null 2>&1 || true
+    rm -rf "$left"
+    git worktree prune
+    ;;
+esac
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/mutation-base.XXXXXX")
 tree="$work/tree"
-# Remove the worktree and the lock however the script ends. The worktree's
-# node_modules is untracked, hence --force.
+printf '%s\n%s\n' "$$" "$work" >"$lock"
+# Remove the worktree however the script ends, and empty the lock file. The
+# worktree's node_modules is untracked, hence --force. The lock itself goes
+# with fd 9 when the process exits.
 trap 'git -C "$root" worktree remove --force "$tree" >/dev/null 2>&1 || true
 rm -rf "$work"
 git -C "$root" worktree prune
-rm -f "$lock"' EXIT
+: >"$lock"' EXIT
 trap 'exit 130' INT TERM
 
 # Escape a value for the message of a workflow command.
@@ -154,6 +188,10 @@ scope() {
 }
 if ! scope list --root "$root" >"$work/current.json" 2>"$work/scope.log"; then
   echo "::error title=テストの設定を読めない::$(escape_data "scripts/mutation-scope.tsが失敗しました: $(tail -n 5 "$work/scope.log")")"
+  exit 1
+fi
+# since and shard would make the baseline a partial run; no flag undoes them.
+if ! scope full-run --root "$root"; then
   exit 1
 fi
 mapfile -t vitest_files < <(node -e 'for (const f of JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")).configFiles) console.log(f)' "$work/current.json")
@@ -194,7 +232,8 @@ if ! (cd "$tree" && pnpm exec wxt prepare) >>"$work/baseline.log" 2>&1; then
 fi
 # GITHUB_ACTIONS is cleared so mutator writes no annotations of its own:
 # check-mutation-findings.ts writes them.
-if ! (cd "$tree" && GITHUB_ACTIONS='' pnpm exec mutator --reporter json) >>"$work/baseline.log" 2>&1; then
+if ! (cd "$tree" && GITHUB_ACTIONS='' pnpm exec mutator --reporter json \
+  --report-dir .mutator/report) >>"$work/baseline.log" 2>&1; then
   no_baseline "全件のミューテーションテストが失敗しました（今の依存でベースのテストが落ちる、など）"
 fi
 echo "mutation:diff: baseline made in $(($(date +%s) - started))s"
@@ -202,6 +241,14 @@ echo "mutation:diff: baseline made in $(($(date +%s) - started))s"
 if ! cp "$tree/.mutator/report/mutation.json" "$work/base-report.json" ||
   ! cp "$tree/.mutator/snapshot.json" "$work/base-snapshot.json"; then
   no_baseline "基準のレポートかsnapshot（.mutator/report/mutation.json、.mutator/snapshot.json）がありません"
+fi
+unselected() {
+  node --experimental-strip-types --disable-warning=ExperimentalWarning \
+    "$root/scripts/mutation-unselected.ts" "$@"
+}
+# A baseline cut short has no Killed to compare with.
+if ! unselected --pending "$work/base-report.json" "基準の全件の実行"; then
+  exit 1
 fi
 
 # What the base collected with its own settings. The saved config files go
@@ -244,8 +291,47 @@ mkdir -p .mutator/scopes
 for snapshot in "$tree"/.mutator/scopes/*.json; do cp "$snapshot" .mutator/scopes/; done
 if [ -f "$tree/.mutator/snapshot.json" ]; then cp "$tree/.mutator/snapshot.json" .mutator/; fi
 
+# The first mutator config file present, as mutator picks it, or nothing.
+first_mutator_config() {
+  local name
+  for name in mutator.config.ts mutator.config.mts mutator.config.mjs \
+    mutator.config.js mutator.config.json; do
+    if [ -f "$1/$name" ]; then
+      echo "$1/$name"
+      return
+    fi
+  done
+}
+base_config_file=$(first_mutator_config "$work/base-config")
+current_config_file=$(first_mutator_config "$root")
+if [ "${base_config_file##*/}" != "${current_config_file##*/}" ] ||
+  { [ -n "$base_config_file" ] && ! cmp -s "$base_config_file" "$current_config_file"; }; then
+  # Step 3b. Without a config at the base, mutator's defaults: an empty one.
+  own_config=$base_mutator
+  if [ "$own_config" = none ]; then
+    own_config="$tree/.mutation-base-mutator.json"
+    echo '{}' >"$own_config"
+  fi
+  echo "mutation:diff: mutator's settings changed; running every mutant at ${merge_base} with the base's own settings"
+  if ! scope full-run --root "$tree" --mutator-config "$own_config"; then
+    exit 1
+  fi
+  rm -rf "$tree/.mutator"
+  if ! (cd "$tree" && GITHUB_ACTIONS='' pnpm exec mutator --config-file "$own_config" \
+    --reporter json --report-dir "$work/base-own") >>"$work/baseline.log" 2>&1 ||
+    ! cp "$work/base-own/mutation.json" "$work/base-own-report.json"; then
+    no_baseline "基準の元のmutatorの設定で、全件のミューテーションテストが失敗しました"
+  fi
+  if ! unselected --pending "$work/base-own-report.json" "基準の元の設定での全件の実行"; then
+    exit 1
+  fi
+fi
+
+# The reporters are named so the settings cannot drop the text that
+# check-mutation-findings.ts reads for unrun mutants.
 if ! GITHUB_ACTIONS='' pnpm exec mutator --since "$merge_base" --include-test-changes \
-  --kill-matrix 2>&1 | tee "$work/diff.log"; then
+  --kill-matrix --reporter text --reporter json --report-dir .mutator/report \
+  2>&1 | tee "$work/diff.log"; then
   echo "::error title=ミューテーションテストが失敗した::mutator --since ${merge_base}が失敗しました。上の出力を確かめてください。"
   exit 1
 fi
@@ -255,8 +341,7 @@ status=0
 node --experimental-strip-types --disable-warning=ExperimentalWarning \
   scripts/check-mutation-findings.ts "$merge_base" "${watch_args[@]}" \
   --mutator-output "$work/diff.log" || status=$?
-node --experimental-strip-types --disable-warning=ExperimentalWarning \
-  scripts/mutation-unselected.ts "$work" || status=1
+unselected "$work" "$merge_base" || status=1
 echo "mutation:diff: done in $(($(date +%s) - started))s"
 if [ "$scope_status" -ne 0 ]; then exit 1; fi
 exit "$status"

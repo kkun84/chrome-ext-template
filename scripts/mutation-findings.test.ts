@@ -4,12 +4,17 @@ import {
   decodeReport,
   formatAnnotation,
   type MutationReport,
+  mergeDeps,
   reviewFindings,
   reviewNotRun,
+  reviewPending,
   reviewSettingChanges,
+  reviewSettingDrops,
   reviewSkippedTests,
   reviewUnselected,
   scopeHashes,
+  snapshotDeps,
+  touchedTests,
   unselectedCandidates,
 } from "./mutation-findings.ts";
 
@@ -238,10 +243,28 @@ describe("unselected mutants", () => {
       ["timeout", "s"],
     ]);
 
-  it("picks unchanged mutants a changed test killed at the base and this run did not decide", () => {
+  it("picks unchanged mutants a touched test killed at the base and this run did not decide", () => {
     expect(
-      unselectedCandidates(baseReport, current, scopes("s"), scopes("t")),
+      unselectedCandidates(
+        baseReport,
+        current,
+        scopes("s"),
+        scopes("t"),
+        (test) => test === changed,
+      ),
     ).toEqual(["missing", "moduleLevel"]);
+  });
+
+  it("picks nothing when no test was touched", () => {
+    expect(
+      unselectedCandidates(
+        baseReport,
+        current,
+        scopes("s"),
+        scopes("t"),
+        () => false,
+      ),
+    ).toEqual([]);
   });
 
   it("fails each mutant no test detects now, or whose status is unexpected", () => {
@@ -276,6 +299,15 @@ describe("unselected mutants", () => {
     );
   });
 
+  it("fails when a run left a mutant Pending", () => {
+    expect(reviewPending(baseReport, "基準の全件の実行")).toEqual([]);
+    const lines = reviewPending(current, "基準の全件の実行");
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatch(
+      /^::error title=実行されなかったミュータントがある::基準の全件の実行で、ミュータント4件（edited、moduleLevel、otherKiller、timeout）が実行されずに/,
+    );
+  });
+
   it("reads scope hashes from a format 2 snapshot only", () => {
     expect(
       scopeHashes({
@@ -287,6 +319,129 @@ describe("unselected mutants", () => {
       new Map(),
     );
     expect(scopeHashes(null)).toEqual(new Map());
+  });
+});
+
+describe("touchedTests", () => {
+  const named = report({
+    ...base,
+    findings: [],
+    testChanges: {
+      added: ["src/new.test.ts#added"],
+      changed: ["src/a.test.ts#changed"],
+      removed: ["src/a.test.ts#removed"],
+    },
+    selectionReasons: [
+      { key: "k", reason: "changedTest", tests: ["src/s.test.ts#selected"] },
+      { key: "j", tests: "not a list" },
+    ],
+  });
+  const deps = new Map([
+    ["src/h.test.ts", ["src/core/helper.ts", "src/core/a.ts"]],
+    ["src/u.test.ts", ["src/core/a.ts"]],
+  ]);
+  const touched = touchedTests(
+    named,
+    new Set(["src/core/helper.ts", "src/f.test.ts"]),
+    deps,
+  );
+
+  it("counts the tests mutator changed, removed or selected for", () => {
+    expect(named.selectedTests).toEqual(["src/s.test.ts#selected"]);
+    expect(touched("src/a.test.ts#changed")).toBe(true);
+    expect(touched("src/a.test.ts#removed")).toBe(true);
+    expect(touched("src/s.test.ts#selected")).toBe(true);
+    expect(touched("src/new.test.ts#added")).toBe(false);
+  });
+
+  it("counts a test whose file or a file it loads changed", () => {
+    expect(touched("src/f.test.ts#any")).toBe(true);
+    expect(touched("src/h.test.ts#uses the helper")).toBe(true);
+    expect(touched("src/u.test.ts#does not")).toBe(false);
+  });
+
+  it("reads deps from a format 2 snapshot and merges them", () => {
+    expect(
+      snapshotDeps({
+        format: 2,
+        deps: { "a.test.ts": ["a.ts", 1], "b.test.ts": "x" },
+      }),
+    ).toEqual(
+      new Map([
+        ["a.test.ts", ["a.ts"]],
+        ["b.test.ts", []],
+      ]),
+    );
+    expect(
+      snapshotDeps({ format: 3, deps: { "a.test.ts": ["a.ts"] } }),
+    ).toEqual(new Map());
+    expect(
+      mergeDeps(
+        new Map([["a.test.ts", ["b.ts", "a.ts"]]]),
+        new Map([
+          ["a.test.ts", ["c.ts", "a.ts"]],
+          ["d.test.ts", ["d.ts"]],
+        ]),
+      ),
+    ).toEqual(
+      new Map([
+        ["a.test.ts", ["a.ts", "b.ts", "c.ts"]],
+        ["d.test.ts", ["d.ts"]],
+      ]),
+    );
+  });
+});
+
+describe("reviewSettingDrops", () => {
+  const mutant = (id: string, status: string, killedBy: string[] = []) => ({
+    id,
+    mutatorName: "Regex",
+    replacement: "/a/",
+    location: { start: { line: 4, column: 1 } },
+    status,
+    killedBy,
+  });
+  const touched = "src/a.test.ts#touched";
+  const other = "src/b.test.ts#other";
+  const own = report({
+    ...base,
+    findings: [],
+    files: {
+      "src/core/a.ts": {
+        mutants: [
+          mutant("excluded", "Killed", [touched, other]),
+          mutant("weakened", "Killed", [touched]),
+          mutant("kept", "Killed", [touched]),
+          mutant("unrelated", "Killed", [other]),
+          mutant("survived", "Survived"),
+        ],
+      },
+    },
+  });
+  const now = report({
+    ...base,
+    findings: [],
+    files: {
+      "src/core/a.ts": {
+        mutants: [
+          mutant("weakened", "Survived"),
+          mutant("kept", "Killed", [touched]),
+        ],
+      },
+    },
+  });
+
+  it("fails on a mutant the new settings drop while a touched test killed it", () => {
+    const lines = reviewSettingDrops(own, now, (test) => test === touched);
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toMatch(
+      /^::error file=src\/core\/a\.ts,line=4,title=設定の変更で、変えたテストが確かめるミュータントが外れた::ミュータントexcluded（Regexで\/a\/に置き換え）は、基準の元の設定では「src\/a\.test\.ts#touched」が検出していましたが、今のmutatorの設定では作られません。/,
+    );
+    expect(lines[1]).toContain("今のmutatorの設定ではSurvivedになります");
+  });
+
+  it("leaves the mutants of untouched tests to the warning about the settings", () => {
+    expect(reviewSettingDrops(own, now, () => false)).toEqual([]);
   });
 });
 
@@ -309,6 +464,12 @@ describe("mutator's text output", () => {
     expect(
       reviewNotRun("not run: 4 over the time budget (--time-budget)\n"),
     ).toHaveLength(1);
+    expect(
+      reviewNotRun("Killed 4 · Survived 3 (1 not infected) · Pending 2\n")[0],
+    ).toMatch(/Survived 3 \(1 not infected\) · Pending 2/);
+    expect(reviewNotRun("Killed 4 · Survived 3 (1 not infected)\n")).toEqual(
+      [],
+    );
   });
 });
 
@@ -358,6 +519,7 @@ describe("decodeReport", () => {
         ]),
         changedTests: [],
         removedTests: [],
+        selectedTests: [],
         uncollected: [],
       },
     });

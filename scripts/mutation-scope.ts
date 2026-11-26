@@ -7,6 +7,7 @@
  *     scripts/mutation-scope.ts list --root <dir> \
  *       [--vitest-config <file>|none] [--mutator-config <file>|none]
  *   node ... scripts/mutation-scope.ts compare <base.json> <current.json> <base-commit>
+ *   node ... scripts/mutation-scope.ts full-run --root <dir> [--mutator-config <file>]
  *
  * `list` prints JSON with, relative to the root:
  * - `configFiles`: each Vitest project's config file, `setupFiles` and
@@ -21,6 +22,12 @@
  * the current settings no longer collect it. Narrowing the settings would
  * otherwise drop tests or mutants from both the baseline and the change, and
  * nothing would look weaker.
+ *
+ * `full-run` fails when mutator's settings keep a run without `--since` from
+ * running every mutant in a way no command line flag can undo: `since` turns
+ * the baseline into a run of the diff, and `shard` runs a part of it.
+ * (`timeBudget` and `mutantsPerLine` leave mutants `Pending`, which
+ * `scripts/mutation-unselected.ts --pending` catches.)
  */
 
 import { execFileSync } from "node:child_process";
@@ -231,6 +238,38 @@ const list = async (args: readonly string[]): Promise<Scope> => {
   }
 };
 
+/** Settings that keep a full run from running every mutant. */
+const PARTIAL_SETTINGS = ["since", "shard"] as const;
+
+/** Error annotations for the settings in `PARTIAL_SETTINGS` that are set. */
+export const reviewFullRun = (
+  config: { readonly [key in (typeof PARTIAL_SETTINGS)[number]]?: unknown },
+  source: string,
+): readonly string[] =>
+  PARTIAL_SETTINGS.filter((key) => config[key] !== undefined).map((key) =>
+    formatAnnotation({
+      level: "error",
+      title: "基準の全件を打ち切る設定がある",
+      file: source,
+      message: `${source}に${key}があります。${key}があると、基準を作る全件の実行が一部のミュータントだけの実行になり、テストが弱くなったかを確かめられないため、失敗にします。設定から外し、必要ならコマンドラインで渡してください。`,
+    }),
+  );
+
+const fullRun = async (args: readonly string[]): Promise<number> => {
+  const root = resolve(optionValue(args, "--root") ?? ".");
+  const file = optionValue(args, "--mutator-config");
+  const loaded =
+    file === "none"
+      ? undefined
+      : await loadConfig(root, file === undefined ? undefined : resolve(file));
+  const lines =
+    loaded === undefined
+      ? []
+      : reviewFullRun(loaded.config, relative(root, loaded.path));
+  process.stdout.write(lines.map((line) => `${line}\n`).join(""));
+  return lines.length === 0 ? 0 : 1;
+};
+
 const readScope = (path: string): Scope =>
   JSON.parse(readFileSync(path, "utf8")) as Scope;
 
@@ -267,8 +306,10 @@ const main = async (): Promise<void> => {
     process.stdout.write(`${JSON.stringify(await list(args))}\n`);
   } else if (command === "compare") {
     process.exitCode = compare(args);
+  } else if (command === "full-run") {
+    process.exitCode = await fullRun(args);
   } else {
-    throw new Error("usage: mutation-scope.ts list|compare ...");
+    throw new Error("usage: mutation-scope.ts list|compare|full-run ...");
   }
 };
 

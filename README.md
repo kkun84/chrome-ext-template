@@ -277,17 +277,27 @@ pnpm test:mutation-guard  # mutation:diffが、テストを弱めた変更を今
    `globalSetup`（`scripts/mutation-scope.ts`）を上書きする。mutatorは、Node.jsの版、mutatorの設定、
    これらのファイルの中身から作る環境ハッシュが一致する時だけ基準と比べるため。
 3. `pnpm install --frozen-lockfile --offline --ignore-scripts`と`wxt prepare`の後、全件を実行する。
+   ミュータントが1件でも`Pending`のまま残れば失敗にする（mutatorの設定の`timeBudget`や`mutantsPerLine`で
+   打ち切ると、基準に`Killed`が残らず、弱めたテストを見逃すため）。コマンドラインで打ち消せない`since`と
+   `shard`は、設定にあれば実行の前に失敗にする（`scripts/mutation-scope.ts full-run`）。レポートの形式と
+   置き場はコマンドラインで渡し、設定の`reporters`や`reportDir`に左右されない。
+   mutatorの設定が基準と違えば、基準の元の設定でも全件を実行する。今の設定で消えるか検出されなくなる
+   ミュータント（`excludedMutators`、`weakMutation`など、ミュータントの集合や結果を変える設定すべて）のうち、
+   基準で変えたか消したテストが検出していたものがあれば失敗にする。それ以外は設定の変更の警告だけにする。
 4. 基準のコミットの元の設定で集めていたテストファイルとmutatorの対象を、今の設定のものと比べる。
    基準のファイルが今も残っている（改名ならgitの対応付けで追う）のに今は集めていなければ失敗にする。
 5. 作業ツリーの`.mutator`を基準のsnapshotに置き換え、
-   `mutator --since <共通の祖先> --include-test-changes --kill-matrix`を実行し、
+   `mutator --since <共通の祖先> --include-test-changes --kill-matrix --reporter text --reporter json`を実行し、
    `scripts/check-mutation-findings.ts`で判定する。`--kill-matrix`は常に付ける。何も検出しない新しい
    テストが分かるうえ、変更の範囲のミュータントで基準の`Killed`を使い回さない（負荷で関係の無い
    テストがたまたま落ちて検出したテストに数えられても、弱めたテストを見逃さない）。
 6. 基準で変えたか消したテストが検出していて、関数の中身が変わっていないのに、5で実行されなかった
    ミュータント（モジュール直下の正規表現など、どのテストも覆わないもの）を、`mutator --only <key>
-   --kill-matrix`で実行して確かめる（`scripts/mutation-unselected.ts`）。
-7. worktreeを消す。同じ作業ツリーで2つ同時には動かない（`.git/mutation-diff.lock`）。
+   --kill-matrix`で実行して確かめる（`scripts/mutation-unselected.ts`）。テストのファイルか、それが
+   （間接的にも）読み込むファイル（テスト用のヘルパーなど。mutatorのsnapshotの`deps`）が変わったテストも、
+   変えたテストに数える。
+7. worktreeを消す。同じ作業ツリーで2つ同時には動かない（`.git/mutation-diff.lock`へのflock。強制終了でも
+   ロックは残らず、次の実行が、終了処理をできなかった実行のworktreeを消す）。
 
 次の時も失敗にします。
 
@@ -296,7 +306,8 @@ pnpm test:mutation-guard  # mutation:diffが、テストを弱めた変更を今
   確かめ、無ければ`scripts/mutation-diff.sh`が写すファイルに足します。
 - 基準を作ったのにmutatorが比べられなかった（`comparison`が`unavailable`）、レポートが壊れているか形が
   違う、基準のrefが無い。
-- 変更の範囲にミュータントが実行されずに残った（`timeBudget`や`mutantsPerLine`など）。
+- 基準の全件か、変更の範囲にミュータントが実行されずに残った（`timeBudget`や`mutantsPerLine`など）。
+  mutatorの設定に`since`か`shard`がある。
 - `.mutator`がgitで追跡されている。
 
 所要時間は、このテンプレートで、手元のpre-push相当が30〜40秒（基準の全件が大半）、CIの判定が20秒ほど、
@@ -449,7 +460,7 @@ Markdownは[rumdl](https://github.com/rvben/rumdl) 0.3.2で検査します（`pn
 | `pnpm fallow:audit` | `origin/main`を基準にしたfallow監査（新規のみ） |
 | `pnpm mutation`   | ミューテーションテスト（`src/core` / `src/services`の全件。結果を表示するだけ） |
 | `pnpm mutation:diff` | `origin/main`との共通の祖先で全件を実行して基準を作り、差分と変更したテストが確かめるコードのミュータントを実行して判定。テストを弱めた変更なら失敗する（`scripts/mutation-diff.sh`） |
-| `pnpm test:mutation-guard` | 一時的なリポジトリに自前の見本を置き、変更が無ければ`mutation:diff`が通り、見本のテストを消すか弱めると失敗することを確かめる（mutatorを上げた時の見張り。CIで毎回実行） |
+| `pnpm test:mutation-guard` | 一時的なリポジトリに自前の見本を置き、変更が無ければ`mutation:diff`が通り、見本のテストを消すか弱める（ヘルパーの中で弱める、`timeBudget`や`since`、`excludedMutators`を足す場合を含む）と失敗することを確かめる（mutatorを上げた時の見張り。CIで毎回実行） |
 | `pnpm mutation:findings` | 直前の結果から、テストを弱めた変更と基準と比べられなかった結果（失敗）、何も検出しない新しいテストと検出できないミュータント（警告）をGitHub Actionsの注釈の形で出す。基準のref（例: `origin/main`）を渡すと、判定に関わるファイルの変更も警告する |
 | `pnpm check`      | `lint` + `typecheck` + `test` + `fallow` + `mutation:diff` |
 | `pnpm check:all`  | `check` + `test:coverage` + `build` + `test:e2e` + `dedupe:check` |

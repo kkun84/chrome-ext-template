@@ -4,6 +4,7 @@ import {
   droppedFiles,
   parseRenames,
   projectFiles,
+  reviewFullRun,
   reviewScope,
 } from "./mutation-scope.ts";
 
@@ -115,5 +116,20 @@ describe("reviewScope", () => {
     expect(lines[1]).toMatch(
       /^::error file=src\/core\/a\.ts,title=ミューテーションテストの対象から外れた::src\/core\/a\.tsは基準では/,
     );
+  });
+});
+
+describe("reviewFullRun", () => {
+  it("fails on since and shard, which make a full run partial", () => {
+    expect(reviewFullRun({}, "mutator.config.json")).toEqual([]);
+    const lines = reviewFullRun(
+      { since: "HEAD", shard: "1/2" },
+      "mutator.config.json",
+    );
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toMatch(
+      /^::error file=mutator\.config\.json,title=基準の全件を打ち切る設定がある::mutator\.config\.jsonにsinceがあります。/,
+    );
+    expect(lines[1]).toContain("shardがあります");
   });
 });
