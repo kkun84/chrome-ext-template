@@ -178,7 +178,7 @@ jobs:
         uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
-          # The changed-lines step diffs against the base branch.
+          # The baseline is the merge base with the base branch.
           fetch-depth: 0
       - name: Set up pnpm
         uses: pnpm/action-setup@v6.1.0
@@ -191,28 +191,38 @@ jobs:
         run: pnpm install --frozen-lockfile
       # Vitest needs .wxt/tsconfig.json (see the test job).
       - name: Prepare WXT
+        id: prepare
         run: pnpm exec wxt prepare
-      # Mutation results are a metric, not a gate: neither step fails on
-      # undetected mutants. On a pull request, mutants on changed lines that no
-      # test detects (including code no test reaches) become warning
-      # annotations on the diff.
-      - name: Mutation tests (changed lines)
+      # scripts/mutation-diff.sh runs every mutant at the merge base with the
+      # base branch, with this checkout's dependencies, as the baseline. Then
+      # it runs the mutants on changed lines and those changed tests cover
+      # (always with --kill-matrix), and the mutants changed tests killed at
+      # the base that the diff did not select. It fails when a test detected
+      # a mutant of unchanged code at the base and no test detects it now:
+      # the change weakened or removed a test. Changes to the files that
+      # decide what it checks are warnings. Same script as
+      # `pnpm mutation:diff` in `pnpm check` and pre-push.
+      - name: Tests weakened by the change
         if: github.event_name == 'pull_request'
-        run: pnpm exec mutator --since "origin/${GITHUB_BASE_REF}"
-      # Editing these files can narrow what mutation testing checks without
-      # any failure, so a pull request that touches them gets a warning.
-      - name: Mutation settings changes
-        if: github.event_name == 'pull_request'
-        run: |
-          git diff --name-only "origin/${GITHUB_BASE_REF}...HEAD" -- 'mutator.config.*' mutator.accepted.json |
-            while read -r file; do
-              echo "::warning file=${file},title=ミューテーションテストの設定が変わった::${file}が変わりました。検査する範囲が狭まっていないか、動作の変わる壊し方を記録していないかを確かめてください。"
-            done
-      # Every mutant, for the overall score, written to the job summary. A
-      # change that only weakens or removes tests lowers this score.
-      # Annotations are left to the step above, so GITHUB_ACTIONS is cleared.
+        run: bash scripts/mutation-diff.sh "origin/${GITHUB_BASE_REF}"
+      # On a copy of this checkout in a temporary repository with a sample of
+      # its own, a branch with no change must pass, and deleting or weakening
+      # the sample's test must fail. A mutator update (e.g. from Dependabot)
+      # that quietly breaks the review fails here. Like the step below, it
+      # runs on every event once the dependencies and WXT are prepared, even
+      # when the step above failed.
+      - name: Mutation guard
+        if: ${{ !cancelled() && steps.prepare.conclusion == 'success' }}
+        run: pnpm test:mutation-guard
+      # Every mutant of this commit, for the overall score, written to the job
+      # summary. It starts from an empty .mutator so the score does not reuse
+      # the baseline, and it also runs when the step above failed. Annotations
+      # are left to the step above, so GITHUB_ACTIONS is cleared.
       - name: Mutation tests (all)
+        if: ${{ !cancelled() && steps.prepare.conclusion == 'success' }}
         run: |
+          set -o pipefail
+          rm -rf .mutator
           GITHUB_ACTIONS='' pnpm mutation | tee "$RUNNER_TEMP/mutation.txt"
           {
             echo "### ミューテーションテスト（全件）"

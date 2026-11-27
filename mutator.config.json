@@ -1,4 +1,5 @@
 {
+  "$schema": "./node_modules/@mizchi/mutator/schema/mutator.config.schema.json",
   "include": ["src/core/**/*.ts", "src/services/**/*.ts"],
   "exclude": ["src/services/services.ts"],
   "reporters": ["text", "html", "json"]

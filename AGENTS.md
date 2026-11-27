@@ -61,7 +61,7 @@ entrypoints  →  layers / services  →  core
 
 ## Machine-enforced rules
 
-規約は文章だけでなく、次のツールで機械的に強制されます（mutatorを除き、すべて`error`）。
+規約は文章だけでなく、次のツールで機械的に強制されます（すべて`error`。mutatorは、テストを弱めた変更と、それを確かめられない状態が`error`で、設定の変更などは`warning`）。
 
 - **Biome**（`biome.json`、`pnpm lint` = `biome ci .`）:
   format / recommended lint、`noExplicitAny`（`any`禁止）、`noImplicitAnyLet`、
@@ -94,19 +94,22 @@ entrypoints  →  layers / services  →  core
   services → core`）と、coreゾーンでの禁止呼び出し（`Date.now`、`Math.random`、
   `chrome.*`、`browser.*`、`globalThis.chrome`）を検出する。`fallow audit`の
   `added-suppression`は`error`（新規の抑制コメントを拒否）。
-- **mutator**（`mutator.config.json`）: `src/core` / `src/services`のミュータントを実行し、
-  テストが検出できないミュータントを表示する。失敗にはしない。`pnpm check`は`pnpm mutation:diff`で
-  `origin/main`との差分だけを実行する。CIの`mutation`ジョブは、PRで変更した行の検出漏れを
-  警告として表示し、全件のスコアをジョブの概要に出す（テストを消しただけの変更はここで分かる）。
-  `src/core` / `src/services`を変えたら、`pnpm mutation:diff`の結果を見直す。検出できないミュータントは、
-  テストが足りないのか、コードが要らないのかを判断する。テストを足すときは、呼び出す側から見える
-  振る舞いを確かめる。ミュータントを落とすためだけに実装をなぞるテストは書かない。手順は
-  `node_modules/@mizchi/mutator/skills/mutation-test-loop/SKILL.md`に従う。
-  等価ミュータントだけを`pnpm exec mutator accept <key> --reason <理由>`で
-  `mutator.accepted.json`に記録する（キーは`pnpm exec mutator --reporter agent`の`gaps[].key`）。
-  テストを弱めた変更を通すために記録してはいけない。ミューテーションテストから外すものは、
-  コメントではなく`mutator.config.json`の`exclude`に書く。PRで`mutator.config.*` /
-  `mutator.accepted.json`を変えると、CIが警告を出す。
+- **mutator**（`mutator.config.json`）: `src/core` / `src/services`のミュータントを実行する。
+  `pnpm check`（とpre-push）とCIの`mutation`ジョブが、`scripts/mutation-diff.sh`でテストを弱めた変更を
+  失敗にする。基準を作れない、ミュータントが実行されずに残る、判定で使えない設定（`since`、`shard`、
+  `runner`、`vitestConfig`、`jestConfig`、`playwrightConfig`、`sharedCache`）がある、なども失敗にする。
+  最後の行（`mutation:diffの結果: …`）が、すべての段階のエラーと警告の件数。仕組みと、失敗・警告の条件、
+  機械では確かめられないものはREADMEの「mutator」節にある。
+  - テストを弱めた変更と判定されたら、弱めたアサーションや消したテストを戻すか、同じ振る舞いを確かめる
+    テストを足す。`mutator accept`で通さない。`mutator.accepted.json`には等価ミュータントだけを記録する。
+  - ミューテーションテストから外すものは、コメントではなく`mutator.config.json`の`exclude`に書く。
+  - 検出できないミュータントは、テストが足りないのか、コードが要らないのかを判断する。テストを足すときは、
+    呼び出す側から見える振る舞いを確かめる。手順は`node_modules/@mizchi/mutator/skills/mutation-test-loop/SKILL.md`。
+  - テストの設定と準備ファイル、`tsconfig*.json`、判定のスクリプト、`package.json`、`lefthook.yml`、
+    ワークフローを変えると警告が出る。警告の内容を確かめ、PRの説明に理由を書く。
+  - 「設定の変更で、変えたテストが確かめるミュータントが外れた」で失敗し、テストを弱めていないなら、
+    設定の変更（mutatorの設定、`tsconfig*.json`、Vitestの設定）を別のPRに分ける。
+  - mutatorを上げたら`pnpm test:mutation-guard`で、判定が外れていないかを確かめる。
 - **TypeScript**（`tsconfig.json`）: `strict`、`noUncheckedIndexedAccess`、
   `exactOptionalPropertyTypes`、`noImplicitOverride`、`noPropertyAccessFromIndexSignature`、
   `noFallthroughCasesInSwitch`、`useUnknownInCatchVariables`、`verbatimModuleSyntax`、
@@ -117,7 +120,8 @@ entrypoints  →  layers / services  →  core
   日本語タイポグラフィの`--fix`、pre-pushは`pnpm check`。globは再帰形（`**/*.{...}`）で
   サブディレクトリのファイルも対象にする。
 - **CI**（`.github/workflows/ci.yml`）: `pnpm lint`（`biome ci`）、fallow、typecheck、
-  tests + coverage、mutation（全件。結果の表示だけ）、build、e2e、nix flake check + shellcheck/actionlint、
+  tests + coverage、mutation（PRではテストを弱めた変更で失敗。全件のスコアは表示だけ）、build、e2e、
+  nix flake check + shellcheck/actionlint、
   `pnpm dedupe --check`。`pnpm audit`は週1回の定期実行だけで動く。
 
 ## よく使うコマンド
@@ -140,7 +144,9 @@ pnpm test:e2e      # ビルド + Playwright
 pnpm fallow        # fallow（デッドコード / 循環依存 / 重複 / ヘルス / 境界）
 pnpm fallow:audit  # origin/main 基準の差分監査（新規のみ）
 pnpm mutation      # ミューテーションテスト（全件。レポートは .mutator/report）
-pnpm mutation:diff # origin/main との差分だけ実行
+pnpm mutation:diff # origin/mainとの共通の祖先で基準を作り、テストを弱めた変更なら失敗
+pnpm test:mutation-guard # mutation:diffが、テストを弱めた変更を今も見つけるかを確かめる
+pnpm mutation:findings # 直前の結果からテストを弱めた変更を判定（基準のrefを渡すと設定の変更も警告）
 pnpm check         # lint + typecheck + test + fallow + mutation:diff
 pnpm check:all     # check + coverage + build + e2e + dedupe
 pnpm clean         # 生成物（.output / .wxt / coverage 等）を削除
@@ -165,8 +171,10 @@ pnpm settings:apply # GitHub 設定を適用
 `pnpm lint`（`biome ci`）に加えて`pnpm dedupe:check`を実行し、`pnpm audit`は週1回の定期実行の
 `audit`ジョブだけが実行します（PRで増える依存は`dependency-review`が検査します）。
 `nix`ジョブは`nix flake check`とdevShellのrealizeの後に
-`shellcheck scripts/*.sh && actionlint`を実行します。artifact
-（カバレッジ・拡張のunpacked/zip・失敗時のPlaywright trace/screenshot）は
+`shellcheck scripts/*.sh && actionlint`を実行します。`mutation`ジョブは、PRで
+`scripts/mutation-diff.sh`を実行し（基準はその場で作り、artifactは使わない）、全件のスコアを
+ジョブの概要に出します。artifact（`coverage`、`chrome-mv3-unpacked` / `chrome-mv3-zip`、
+失敗時だけ`playwright-test-results`（trace / screenshot）と`playwright-report`）は
 Actions実行ページのArtifactsから取得できます。
 `.github/workflows/verify-lockfile.yml`が`actions.lock`の整合性を検証します
 （`ci.yml` / `codeql.yml` / `dependency-review.yml` / `verify-lockfile.yml`を含む）。

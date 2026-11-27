@@ -8,7 +8,7 @@ Windows + WSLで開発し、Windows側のChromeにunpacked拡張として読み�
 - **TypeScript 7.0.2** — Goネイティブの`tsc`（型チェック専用。ビルドと検査はTS JS APIを使わない。mutatorだけが型エラーになるミュータントの判定に`typescript/unstable/sync`を使う）
 - **Vitest 5** — `src/core`の純関数ユニットテスト（カバレッジは`@vitest/coverage-v8`）
 - **Playwright 1.59.1** — ビルド済み拡張のE2E（nixpkgs `playwright-driver`と一致させるため固定）
-- **mutator 0.2.0** — ミューテーションテスト（CIは全件、`pnpm check`は差分だけ実行）
+- **mutator 0.4.5** — ミューテーションテスト（CIは全件、`pnpm check`は差分だけ実行。テストを弱めた変更は失敗にする）
 - **Biome 2.6.4** — lint / format（`pnpm lint` = `biome ci`、assistでimport整理）
 - **rumdl 0.3.2** — Markdownのlint（`pnpm lint:md`、日本語ドキュメントのため`MD013`のみ無効）
 - **fallow 3.42.0** — デッドコード / 循環依存 / 重複 / ヘルススコア / アーキテクチャ境界の解析
@@ -153,7 +153,7 @@ Nix外でローカル検証する場合のみ`CHROME_PATH=/usr/bin/google-chrome
 | -------------------- | -------------------------------------------------------------------- |
 | `lint`               | `pnpm lint`（`biome ci` + `rumdl check` + ja-space + pnpm-policy + no-suppress）。続けて`pnpm dedupe:check`を実行 |
 | `audit (weekly)`     | `pnpm run audit`。週1回の定期実行のときだけ動く（PRでは動かない） |
-| `mutation`           | ミューテーションテスト。PRでは変更した行の検出漏れを警告として表示し、続けて全件のスコアをジョブの概要（Summary）に出す。失敗にはしない |
+| `mutation`           | ミューテーションテスト。PRでは、ベースブランチとの共通の祖先で全件を実行した結果を基準にして、テストを弱めた変更なら失敗する。変更した行の検出漏れと、何も検出しない新しいテストは警告にする。どのイベントでも`pnpm test:mutation-guard`を実行し、全件のスコアをジョブの概要（Summary）に出す |
 | `fallow`             | `pnpm fallow`（デッドコード / 循環依存 / 重複 / ヘルス / 境界）。PRでは`fallow audit --gate new-only`も実行 |
 | `typecheck`          | `pnpm typecheck`（`wxt prepare && tsc --noEmit`）                    |
 | `test`               | `pnpm test:coverage` → カバレッジartifact `coverage`                |
@@ -249,44 +249,139 @@ pnpm fallow:audit    # origin/main 基準の差分監査（新規の問題のみ
 対象は`mutator.config.json`の`include`（`src/core`と`src/services`）です。
 
 ```bash
-pnpm mutation       # 全件を実行。レポートは .mutator/report/index.html
-pnpm mutation:diff  # origin/main との差分にあるミュータントだけ実行
+pnpm mutation             # 全件を実行。レポートは.mutator/report/index.html
+pnpm mutation:diff        # origin/mainとの共通の祖先で基準を作り、テストを弱めた変更なら失敗
+pnpm mutation:findings    # 直前の結果（.mutator/report/mutation.json）を判定
+pnpm test:mutation-guard  # mutation:diffが、テストを弱めた変更を今も見つけるかを確かめる
 ```
 
-結果は、テストを見直すための指標です。検出できないミュータント（生き残りと、どのテストも届かないもの）が
-あっても失敗にはしません。テストが元々落ちている場合だけ失敗します。
+失敗にするのは、テストを弱めた変更です。変わっていないコードのミュータントを、基準ではテストが
+検出していたのに、今はどのテストも検出しない場合を指します。アサーションを弱めたり、テストを消したり
+した変更がこれに当たります。弱めたアサーションや消したテストを戻すか、同じ振る舞いを確かめるテストを
+足してください。`mutator accept`で通してはいけません。`mutator.accepted.json`は、どんな入力でも振る舞いが
+変わらない等価ミュータント専用です（`pnpm exec mutator accept <key> --reason "equivalent: <理由>"`。
+キーは`pnpm exec mutator --reporter agent`の`gaps[].key`）。
 
-- **手元**: `pnpm check`の最後で`pnpm mutation:diff`を実行します。差分にミュータントが無ければ、
-  テストを1回流すだけで終わります。`origin/main`が無い環境（`.git`の無い展開先や浅いclone）では、
-  その旨を表示して何もしません。
-- **CI**: `mutation`ジョブが、PRでは変更した行のミュータントを実行し、検出できなかったもの
-  （どのテストも届かないものを含む）をPRの差分に警告として表示します。続けて`pnpm mutation`で
-  全件を実行し、全体のスコアを出します。テストを弱めたり消したりしただけの変更は、全件の結果に
-  現れます。
-- `pnpm mutation` / `pnpm mutation:diff`を単独で実行する前に、`pnpm typecheck`（または
-  `pnpm exec wxt prepare`）で`.wxt/`を作っておきます。`pnpm test`と同じ前提です。
-- 検出できなかったミュータントは、テストが足りないのか、コードが要らないのかを考えます。
-  テストを足すときは、呼び出す側から見える振る舞いを確かめます。数字を満たすためだけのテストは
-  書きません。手順は`node_modules/@mizchi/mutator/skills/mutation-test-loop/SKILL.md`にあります。
-- どんな入力でも振る舞いが変わらない等価ミュータントだけを、理由を付けて
-  `mutator.accepted.json`に記録します。キーは`pnpm exec mutator --reporter agent`の出力の
-  `gaps[].key`にあります。
+何も検出しない新しいテスト、検出できないミュータント、飛ばしたテスト、テストランナーが集めない
+テストファイル、消したテスト（他のテストが同じミュータントを検出していて失敗にならないもの）は警告です。全件のスコアは表示だけです。検出できないミュータントは、テストが足りないのか、
+コードが要らないのかを考えます。手順は`node_modules/@mizchi/mutator/skills/mutation-test-loop/SKILL.md`に
+あります。
 
-  ```bash
-  pnpm exec mutator accept <key> --reason "equivalent: <理由>"
-  ```
+### 判定の仕組み
+
+`pnpm mutation:diff`（`scripts/mutation-diff.sh`）は、前回の結果を使わず、毎回その場で基準を作ります。
+
+1. `git merge-base origin/main HEAD`のコミットを、一時ディレクトリに`git worktree add --detach`で取り出す。
+2. そこへ今の作業ツリーの`package.json`、`pnpm-lock.yaml`、`pnpm-workspace.yaml`、`.npmrc`、
+   `tsconfig*.json`、`vitest.config.*`、`mutator.config.*`と、Vitestの設定から解決した`setupFiles`・
+   `globalSetup`（`scripts/mutation-scope.ts`）を上書きする。mutatorは、Node.jsの版、mutatorの設定、
+   これらのファイルの中身から作る環境ハッシュが一致する時だけ基準と比べるため。
+3. `pnpm install --frozen-lockfile --offline --ignore-scripts`と`wxt prepare`の後、全件を実行する。
+   ミュータントが1件でも`Pending`のまま残れば失敗にする（mutatorの設定の`timeBudget`や`mutantsPerLine`で
+   打ち切ると、基準に`Killed`が残らず、弱めたテストを見逃すため）。mutatorの設定の次の項目は、あれば実行の
+   前に失敗にする（`scripts/mutation-scope.ts full-run`）。コマンドラインで打ち消せない`since`と`shard`。
+   `vitest.config.*`とは別の設定やテストランナーでテストを集めさせる`runner`、`vitestConfig`、`jestConfig`、
+   `playwrightConfig`（4で比べる一覧は`vitest.config.*`から作るため）。基準と今が`.git/mutator/`の同じ
+   結果を読み書きする`sharedCache`。レポートの形式と置き場はコマンドラインで渡し、設定の`reporters`や
+   `reportDir`に左右されない。
+   mutatorの設定、`tsconfig*.json`、`vitest.config.*`、Vitestの`setupFiles`・`globalSetup`（基準のものと
+   今のもの）のどれかが基準のコミットと違えば、worktreeのそれらを基準のコミットの物に戻して、もう一度
+   全件を実行する。今の設定で消えるか`Killed`でなくなるミュータント（`excludedMutators`、`weakMutation`、
+   ミュータントを`CompileError`にする`tsconfig.json`の設定など）のうち、基準で変えたか消したテストが
+   検出していたものがあれば失敗にする。それ以外は設定の変更の警告だけにする。`package.json`と
+   ロックファイルは戻さない（基準の依存は入れない）。
+4. 基準のコミットの元の設定で集めていたテストファイルとmutatorの対象を、今の設定のものと比べる。
+   基準のファイルが今も残っている（改名ならgitの対応付けで追う）のに今は集めていなければ失敗にする。
+5. 作業ツリーの`.mutator`を基準のsnapshotに置き換え、
+   `mutator --since <共通の祖先> --include-test-changes --kill-matrix --reporter text --reporter json`を実行し、
+   `scripts/check-mutation-findings.ts`で判定する。`--kill-matrix`は常に付ける。何も検出しない新しい
+   テストが分かるうえ、変更の範囲のミュータントで基準の`Killed`を使い回さない（負荷で関係の無い
+   テストがたまたま落ちて検出したテストに数えられても、弱めたテストを見逃さない）。
+6. 基準で変えたか消したテストが検出していて、関数の中身が変わっていないのに、5で実行されなかった
+   ミュータント（モジュール直下の正規表現など、どのテストも覆わないもの）を、`mutator --only <key>
+   --kill-matrix`で実行して確かめる（`scripts/mutation-unselected.ts`）。テストのファイルか、それが
+   （間接的にも）読み込むファイル（テスト用のヘルパーなど。mutatorのsnapshotの`deps`）が変わったテストも、
+   変えたテストに数える。実行し直して`Survived`か`NoCoverage`なら「テストが弱くなった」、`Ignored`か
+   `Pending`か結果が無ければ「ミュータントの結果が想定と違う」で失敗にする。`Killed`、`Timeout`、
+   `RuntimeError`、`CompileError`（ソースの型を変えて、ミュータントが型検査を通らなくなった）は検出に数える。
+7. 各段階が出した注釈（エラーと警告）を、最後の1行で題名ごとに数える（`mutation:diffの結果: …`）。注釈を
+   出さずに失敗した時は「判定が途中で止まった」のエラーを足す。worktreeを消す。同じ作業ツリーで2つ同時には
+   動かない（`.git/mutation-diff.lock`へのflock。強制終了でもロックは残らず、次の実行が、終了処理をできな
+   かった実行のworktreeを消す）。
+
+次の時も失敗にします。
+
+- 基準を作れない（ベースのテストが今の依存で落ちる、など）。多くは依存の更新でテストが壊れた時で、
+  通常のテストも落ちます。テストが読むファイルを足したなら、`mutation:diff: copied`の行に入っているかを
+  確かめ、無ければ`scripts/mutation-diff.sh`が写すファイルに足します。
+- 基準を作ったのにmutatorが比べられなかった（`comparison`が`unavailable`）、レポートが壊れているか形が
+  違う、基準のrefが無い。
+- 基準の全件か、変更の範囲にミュータントが実行されずに残った（`timeBudget`や`mutantsPerLine`など）。
+  mutatorの設定に`since`、`shard`、`runner`、`vitestConfig`、`jestConfig`、`playwrightConfig`、
+  `sharedCache`のどれかがある。
+- `.mutator`がgitで追跡されている。
+
+所要時間は、このテンプレートで、手元のpre-push相当が30〜40秒（基準の全件が大半）、CIの判定が20秒ほど、
+`pnpm test:mutation-guard`がCIで4分ほどです。
+
+### 機械では確かめられないもの
+
+- 次のファイルが変わると警告を出すので、人が確かめます。`mutator.config.*`、`mutator.accepted.json`、
+  `tsconfig*.json`、`vitest.config.*`、Vitestの`setupFiles` / `globalSetup`、判定のスクリプト（`scripts/mutation-*`、
+  `scripts/check-mutation-findings.ts`）、`package.json`、`lefthook.yml`、`.github/workflows/*`。
+  準備ファイルで`expect`を無力化したり、Vitestの`testNamePattern`などでファイルを集めたままテストを
+  外したりする変更は、ミューテーションテストでは見つかりません。コミットしていない変更も対象です。
+- 検出が減らない弱め方（アサーションの削除や、`toBe`から`toBeFalsy`への弱めなど）は通ります。
+  ミューテーションテストで測る検出力が落ちていないためです。テストを丸ごと消した時は「テストを消した」
+  （同じファイルにテストを足していれば「テストを消したか改名した」）の警告を出しますが、アサーションだけを
+  消した時は警告も出ません。
+- 関数を書き換えて同時にそのテストを消すと、書き換えた箇所は「検出できないミュータント」の警告に
+  なるだけです（比べるのは変わっていないコードだけ）。
+- 基準で`Timeout`や`RuntimeError`で検出していたミュータントは、判定の外です（mutatorが比べるのは
+  基準の`Killed`だけ）。
+- 破壊的な依存の更新とテストの直しを同じPRに入れると、基準を作れず必ず失敗します。新旧どちらの依存
+  でも動くテストの直しを先に`main`へ入れます。分けられない時は管理者が判断します。
+- テストがファイルシステムから読むデータの変更は検出しません。
+- ソースのファイルを改名（移動）して、同時にそのテストを弱めると、警告だけになります（改名したファイルの
+  ミュータントは、変わったコードとして扱われます）。
+- ソースを変えた結果、変えていない他の関数のミュータントを検出できなくなっても、判定の対象外です。テスト
+  ではなくソースの変更で検出が減る場合は、テストを弱めた変更として扱いません。
+- 逆に、ソースを変えた結果、呼び出す側のミュータントが等価になる（どう書き換えても振る舞いが変わらない）
+  と、テストを弱めていなくても「テストが弱くなった」で失敗する事があります。
+- mutatorの設定（や`tsconfig*.json`、Vitestの設定）と、テストのファイルか、それが読み込むソースを同じPRで
+  変えると、テストを弱めていなくても「設定の変更で、変えたテストが確かめるミュータントが外れた」で失敗する
+  事があります。`tsconfig.json`を変えて、同じPRでテストファイルにテストを足すだけでも失敗します（その
+  ファイルのテストが、すべて変えたテストに数えられるため）。その時は設定の変更を別のPRに分けます。
+- `package.json`とロックファイルを変えた時は、基準の元の依存では数え直しません。依存の更新で
+  ミュータントが`CompileError`になって比較から外れても、見つかりません。
+- 多くのテストが読み込むソースを変えると、それらのテストが変えたテストに数えられ、6の実行し直しが
+  増えて遅くなります。
+- `pnpm mutation:diff`の親のシェルだけを強制終了すると、それが起動したmutatorやpnpmが終わるまで
+  ロックが残ります（その間に次を実行すると「mutation:diffが動いている」で止まります）。
+
+### 実行する場所
+
+- **手元**: `pnpm check`の最後で`pnpm mutation:diff`を実行します。pre-pushも`pnpm check`です。
+  `origin/main`が無い環境（`.git`の無い展開先や`origin`の無いclone）では何もしません。基準の
+  `pnpm install`はオフラインなので、先に作業ツリーで`pnpm install`を済ませます。`pnpm mutation`を
+  単独で実行する前は、`pnpm typecheck`（または`pnpm exec wxt prepare`）で`.wxt/`を作ります。
+- **CI**: `mutation`ジョブは、PRで`scripts/mutation-diff.sh origin/<base>`を実行します（ベースが`main`
+  以外でも共通の祖先を基準にする）。`pnpm test:mutation-guard`と全件（スコアをジョブの概要に出す）は、
+  依存の導入と`wxt prepare`が通れば、push・PR・週1回の定期実行のどれでも、判定が失敗しても実行します。
+  Dependabotがmutatorを上げたPRでも見張りが動きます。`.github/settings/ruleset-main.json`は、`mutation`を
+  マージに必須のチェックにしています。
 
 外すときは、次を消します。
 
-1. `package.json`の`mutation` / `mutation:diff`スクリプト、`check`の`&& pnpm mutation:diff`、
-   `clean`の`.mutator`
-2. `mutator.config.json`と`mutator.accepted.json`
-3. devDependencyの`@mizchi/mutator`（`pnpm remove @mizchi/mutator`）
-4. `.github/workflows/ci.yml`の`mutation`ジョブと、`.github/settings/ruleset-main.json`の
-   `mutation`
-5. `.mutator`の除外（`.gitignore`、`biome.json`、`.rumdl.toml`、`.fallowrc.json`、
-   `scripts/ja-space-files.ts`）
-6. `AGENTS.md`とこのREADMEのmutatorの記述
+1. `package.json`の`mutation` / `mutation:diff` / `mutation:findings` / `test:mutation-guard`スクリプト、
+   `check`の`&& pnpm mutation:diff`、`clean`の`.mutator`
+2. `scripts/mutation-*.ts`、`scripts/mutation-*.sh`、`scripts/check-mutation-findings.ts`とそれらのテスト、
+   `scripts/fixtures/mutator-*.json`
+3. `mutator.config.json`と`mutator.accepted.json`
+4. devDependencyの`@mizchi/mutator`（`pnpm remove @mizchi/mutator`）
+5. `.github/workflows/ci.yml`の`mutation`ジョブと、`.github/settings/ruleset-main.json`の`mutation`
+6. `.mutator`の除外（`.gitignore`、`biome.json`、`.rumdl.toml`、`.fallowrc.json`、`scripts/ja-space-files.ts`）
+7. `AGENTS.md`とこのREADMEのmutatorの記述
 
 ## lefthook（Gitフック）
 
@@ -295,7 +390,7 @@ pnpm mutation:diff  # origin/main との差分にあるミュータントだけ�
 - フックは`prepare`スクリプト（`pnpm install` → `lefthook install`）でインストールされます。
 - フックをスキップするには`LEFTHOOK=0`を設定します（例: `LEFTHOOK=0 git commit ...`）。
 - `pre-commit`はstagedの対象ファイルに`biome check --write`（`**/*.{js,jsx,ts,tsx,json,css}`）と`rumdl check`（`**/*.md`）、日本語タイポグラフィの`--fix`（`**/*.{md,ts,tsx,js,yml,yaml,sh,html}`）を実行し、修正をstageします。globは再帰形なのでサブディレクトリのファイルも対象です。
-- `pre-push`は`pnpm check`（lint + typecheck + test + fallow + mutation:diff）を実行します。
+- `pre-push`は`pnpm check`（lint + typecheck + test + fallow + mutation:diff）を実行します。テストを弱めた変更は`mutation:diff`で止まります（[mutator](#mutatorミューテーションテスト)）。
 - 設定は [`lefthook.yml`](./lefthook.yml)。
 - `lefthook`は`2.2.1`に固定しています。npm provenanceを持ち、かつ7日ポリシーを満たす後続リリースが出るまでは`2.2.1`のままにします（その条件を満たした時点で上げます）。
 
@@ -395,7 +490,9 @@ Markdownは[rumdl](https://github.com/rvben/rumdl) 0.3.2で検査します（`pn
 | `pnpm fallow`     | fallowでデッドコード / 循環依存 / 重複 / ヘルス / 境界を解析 |
 | `pnpm fallow:audit` | `origin/main`を基準にしたfallow監査（新規のみ） |
 | `pnpm mutation`   | ミューテーションテスト（`src/core` / `src/services`の全件。結果を表示するだけ） |
-| `pnpm mutation:diff` | `origin/main`との差分にあるミュータントだけ実行。結果を表示するだけ |
+| `pnpm mutation:diff` | `origin/main`との共通の祖先で全件を実行して基準を作り、差分と変更したテストが確かめるコードのミュータントを実行して判定。テストを弱めた変更なら失敗する（`scripts/mutation-diff.sh`） |
+| `pnpm test:mutation-guard` | 一時的なリポジトリに自前の見本を置き、変更が無ければ`mutation:diff`が通り、見本のテストを消すか弱める（ヘルパーの中で弱める、`timeBudget`や`since`、`excludedMutators`を足す場合を含む）と失敗することを確かめる（mutatorを上げた時の見張り。CIで毎回実行） |
+| `pnpm mutation:findings` | 直前の結果から、テストを弱めた変更と基準と比べられなかった結果（失敗）、何も検出しない新しいテストと検出できないミュータント（警告）をGitHub Actionsの注釈の形で出す。基準のref（例: `origin/main`）を渡すと、判定に関わるファイルの変更も警告する |
 | `pnpm check`      | `lint` + `typecheck` + `test` + `fallow` + `mutation:diff` |
 | `pnpm check:all`  | `check` + `test:coverage` + `build` + `test:e2e` + `dedupe:check` |
 | `pnpm clean`      | 生成物（`.output` / `.wxt` / `coverage`等）を削除 |
