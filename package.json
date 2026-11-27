@@ -40,7 +40,7 @@
     "prepare": "sh -c 'if [ -d .git ]; then lefthook install; else echo \"skipping lefthook install: no .git directory\"; fi'"
   },
   "dependencies": {
-    "effect": "4.1.2"
+    "effect": "4.1.4"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.4",
