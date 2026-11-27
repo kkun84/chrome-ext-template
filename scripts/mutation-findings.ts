@@ -7,7 +7,8 @@
  * test. That fails, and so does a report that could not be compared with the
  * baseline or does not have the expected shape: either way nothing shows that
  * the tests kept their strength. A `newTestNoKills` finding (a new test that
- * detects no mutant) and an undetected mutant (`mutationGap`) are warnings.
+ * detects no mutant), an undetected mutant (`mutationGap`) and a removed test
+ * are warnings.
  * The CLI shell is `check-mutation-findings.ts`.
  */
 
@@ -44,7 +45,8 @@ export interface MutationReport {
   readonly files: ReadonlyMap<string, readonly MutantRecord[]>;
   /** Changed test files the runner does not collect (`warnings`). */
   readonly uncollected: readonly string[];
-  /** Test ids changed and removed since the baseline (`testChanges`). */
+  /** Test ids added, changed and removed since the baseline (`testChanges`). */
+  readonly addedTests: readonly string[];
   readonly changedTests: readonly string[];
   readonly removedTests: readonly string[];
   /**
@@ -96,6 +98,7 @@ type ReportField =
   | "warnings"
   | "file"
   | "testChanges"
+  | "added"
   | "changed"
   | "removed"
   | "selectionReasons"
@@ -175,7 +178,8 @@ const decodeUncollected = (value: unknown): readonly string[] =>
 
 const decodeTestChanges = (
   value: unknown,
-): Pick<MutationReport, "changedTests" | "removedTests"> => ({
+): Pick<MutationReport, "addedTests" | "changedTests" | "removedTests"> => ({
+  addedTests: isObject(value) ? strings(value.added) : [],
   changedTests: isObject(value) ? strings(value.changed) : [],
   removedTests: isObject(value) ? strings(value.removed) : [],
 });
@@ -762,7 +766,7 @@ export const reviewSettingDrops = (
       return formatAnnotation({
         level: "error",
         title: "設定の変更で、変えたテストが確かめるミュータントが外れた",
-        message: `ミュータント${mutant.id}${change}は、基準の元の設定では${killers}が検出していましたが、今の設定（mutatorの設定、tsconfig*.json、Vitestの設定と準備ファイル）では${now === undefined ? "作られません" : `${now}になります`}。変えたか消したテストが検出していたミュータントを設定で外すと、そのテストを弱めても見つかりません。設定を戻すか、テストの変更を戻してください。テストを弱めていなくても、テストが読み込むソースを同じPRで変えると、そのテストは変えたテストに数えられます。その時は設定の変更を別のPRに分けてください。`,
+        message: `ミュータント${mutant.id}${change}は、基準の元の設定では${killers}が検出していましたが、今の設定（mutatorの設定、tsconfig*.json、Vitestの設定と準備ファイル）では${now === undefined ? "作られません" : `${now}になります`}。変えたか消したテストが検出していたミュータントを設定で外すと、そのテストを弱めても見つかりません。設定を戻すか、テストの変更を戻してください。テストを弱めていなくても、テストのファイルか、それが読み込むソースを同じPRで変えると、そのテストは変えたテストに数えられます。その時は設定の変更を別のPRに分けてください。`,
         ...place,
       });
     });
@@ -776,6 +780,42 @@ const uncollected = (report: MutationReport): readonly Annotation[] =>
     file,
     message: `${file}は変わりましたが、テストランナーが集めません。このファイルのテストは何も検出しません。vitest.config.*のinclude / excludeなどを確かめてください。`,
   }));
+
+/**
+ * Warnings for the tests the change removed.
+ *
+ * Removing a test fails only when no other test detects what it detected.
+ * When another test does, nothing else reports the removal, so a person has
+ * to see that it was meant. mutator tells tests apart by id (file, suites and
+ * title), so a renamed test is a removed test plus an added one: when the
+ * same file has an added test, the warning says it may be a rename. A test
+ * that a detection regression names is left to that error.
+ */
+const removed = (report: MutationReport): readonly Annotation[] => {
+  const regressedKillers = new Set(
+    report.findings
+      .filter((finding) => finding.kind === "detectionRegression")
+      .flatMap((finding) => finding.previousKillers),
+  );
+  const filesWithAdded = new Set(report.addedTests.map(fileOfTest));
+  return report.removedTests
+    .filter((test) => !regressedKillers.has(test))
+    .map((test) =>
+      filesWithAdded.has(fileOfTest(test))
+        ? {
+            level: "warning",
+            title: "テストを消したか改名した",
+            message: `${test}が無くなりました。同じファイルにテストが足されているので、改名かもしれません。改名でなければ、他のテストが同じミュータントを検出しているため失敗にはしませんが、意図した削除かを人が確かめてください。`,
+            ...testFile(test),
+          }
+        : {
+            level: "warning",
+            title: "テストを消した",
+            message: `${test}を消しました。他のテストが同じミュータントを検出しているため失敗にはしませんが、意図した削除かを人が確かめてください。`,
+            ...testFile(test),
+          },
+    );
+};
 
 /**
  * Review the findings of a report.
@@ -803,9 +843,13 @@ export const reviewFindings = (report: MutationReport): Review => {
     )
     .map((finding) => gap(report, finding));
   return {
-    lines: [...regressions, ...idle, ...gaps, ...uncollected(report)].map(
-      formatAnnotation,
-    ),
+    lines: [
+      ...regressions,
+      ...idle,
+      ...gaps,
+      ...uncollected(report),
+      ...removed(report),
+    ].map(formatAnnotation),
     exitCode: regressions.length === 0 ? 0 : 1,
   };
 };

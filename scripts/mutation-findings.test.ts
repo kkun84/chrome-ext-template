@@ -25,6 +25,9 @@ const REGRESSION_ADVICE =
 const GAP_ADVICE =
   "どのテストも検出しません。テストが足りないのか、コードが要らないのかを見直してください。どんな入力でも振る舞いが変わらない等価ミュータントだけをmutator acceptで記録します。手順はnode_modules/@mizchi/mutator/skills/mutation-test-loop/SKILL.mdにあります。";
 
+const REMOVED_ADVICE =
+  "他のテストが同じミュータントを検出しているため失敗にはしませんが、意図した削除かを人が確かめてください。";
+
 const report = (value: unknown): MutationReport => {
   const decoded = decodeReport(value);
   if ("problem" in decoded) {
@@ -69,6 +72,8 @@ describe("reviewFindings", () => {
       lines: [
         `::error file=src/core/tabs.ts,line=37,title=テストが弱くなった::変わっていないコードのミュータント1gfsysf9ilu（ConditionalExpressionでfalseに置き換え）を、前は「src/core/tabs.test.ts#selectPersistableUrl > prefers the active tab over an earlier tab in the last-focused window」が検出していましたが、${REGRESSION_ADVICE}`,
         `::warning file=src/core/tabs.ts,line=31,title=テストが検出できないミュータント::ミュータント1j1pdhef46w（FnValueで{ return ""; }に置き換え）は、${GAP_ADVICE}`,
+        `::warning file=src/core/tabs.test.ts,title=テストを消した::src/core/tabs.test.ts#selectPersistableUrl > falls back to a persistable tab when the active tab is the popupを消しました。${REMOVED_ADVICE}`,
+        `::warning file=src/core/tabs.test.ts,title=テストを消した::src/core/tabs.test.ts#selectPersistableUrl > falls back to any persistable tab, skipping non-persistable onesを消しました。${REMOVED_ADVICE}`,
       ],
       exitCode: 1,
     });
@@ -170,6 +175,71 @@ describe("reviewFindings", () => {
     ).toMatch(
       /^::warning file=src\/core\/a\.test\.mts,title=拾われないテストファイル::/,
     );
+  });
+
+  it("warns about each removed test without failing", () => {
+    expect(
+      reviewFindings(
+        report({
+          ...base,
+          findings: [],
+          testChanges: {
+            added: [],
+            changed: ["src/core/tabs.test.ts#kept"],
+            removed: ["src/core/tabs.test.ts#a > gone", "#bare"],
+          },
+        }),
+      ),
+    ).toEqual({
+      lines: [
+        `::warning file=src/core/tabs.test.ts,title=テストを消した::src/core/tabs.test.ts#a > goneを消しました。${REMOVED_ADVICE}`,
+        `::warning title=テストを消した::#bareを消しました。${REMOVED_ADVICE}`,
+      ],
+      exitCode: 0,
+    });
+  });
+
+  it("says a removed test may be a rename when its file has an added test", () => {
+    expect(
+      reviewFindings(
+        report({
+          ...base,
+          findings: [],
+          testChanges: {
+            added: ["src/core/tabs.test.ts#new name"],
+            removed: [
+              "src/core/tabs.test.ts#old name",
+              "src/core/url.test.ts#gone",
+            ],
+          },
+        }),
+      ),
+    ).toEqual({
+      lines: [
+        "::warning file=src/core/tabs.test.ts,title=テストを消したか改名した::src/core/tabs.test.ts#old nameが無くなりました。同じファイルにテストが足されているので、改名かもしれません。改名でなければ、他のテストが同じミュータントを検出しているため失敗にはしませんが、意図した削除かを人が確かめてください。",
+        `::warning file=src/core/url.test.ts,title=テストを消した::src/core/url.test.ts#goneを消しました。${REMOVED_ADVICE}`,
+      ],
+      exitCode: 0,
+    });
+  });
+
+  it("leaves a removed test that a regression names to the error", () => {
+    const review = reviewFindings(
+      report({
+        ...base,
+        findings: [
+          {
+            kind: "detectionRegression",
+            key: "weak",
+            previousKillers: ["src/core/tabs.test.ts#gone"],
+          },
+        ],
+        testChanges: { removed: ["src/core/tabs.test.ts#gone"] },
+      }),
+    );
+    expect(review.lines).toHaveLength(1);
+    expect(review.lines[0]).toMatch(/^::error [^:]*title=テストが弱くなった::/);
+    expect(review.exitCode).toBe(1);
   });
 
   it("fails when there was no baseline to compare with", () => {
@@ -541,6 +611,7 @@ describe("decodeReport", () => {
           ["a.ts", []],
           ["b.ts", []],
         ]),
+        addedTests: [],
         changedTests: [],
         removedTests: [],
         selectedTests: [],

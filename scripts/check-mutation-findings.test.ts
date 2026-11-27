@@ -73,6 +73,28 @@ describe("run", () => {
     expect(run(["--no-summary"], root)).toEqual({ output: "\n", exitCode: 0 });
   });
 
+  it("exits 0 and counts the warning when a removed test leaves nothing undetected", () => {
+    writeReport({
+      schemaVersion: "2",
+      comparison: "available",
+      findings: [],
+      files: {},
+      testChanges: {
+        added: [],
+        changed: [],
+        removed: ["src/core/a.test.ts#a"],
+      },
+    });
+    const { output, exitCode } = run([], root);
+    expect(exitCode).toBe(0);
+    expect(output).toMatch(
+      /^::warning file=src\/core\/a\.test\.ts,title=テストを消した::/,
+    );
+    expect(output.trimEnd().split("\n").at(-1)).toBe(
+      "mutation:diffの結果: 通過。エラー0件、警告1件（「テストを消した」1件）",
+    );
+  });
+
   it("exits 1 when there is no report", () => {
     const { output, exitCode } = run([], root);
     expect(exitCode).toBe(1);
